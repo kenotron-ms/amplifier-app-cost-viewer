@@ -1,0 +1,1 @@
+*.pyc\n__pycache__/\n*.pyo\n.env\n.venv/\ndist/\n*.egg-info/\n.ruff_cache/
