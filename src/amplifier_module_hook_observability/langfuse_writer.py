@@ -10,6 +10,18 @@ Self-hosted Langfuse (Docker Compose):
     cd /path/to/langfuse && docker compose up -d
     # UI at http://localhost:3000 (~2 min startup)
     # Create project -> copy public/secret keys -> paste into config
+
+Non-blocking usage
+------------------
+All public methods are synchronous so they can be run in a thread pool.
+Call them via ``asyncio.to_thread(writer.method, ...)`` from async hook
+handlers so they never block the CLI event loop.
+
+Sessions
+--------
+Every observation is created inside a ``propagate_attributes(session_id=...)``
+context so Langfuse groups all traces from the same Amplifier session in its
+Sessions UI.
 """
 
 from __future__ import annotations
@@ -24,11 +36,21 @@ logger = logging.getLogger(__name__)
 class LangfuseWriter:
     """Sends observability records to a Langfuse instance.
 
-    Creates one trace per Amplifier session. Provider calls become
-    Generation observations; tool calls become Span observations.
+    Creates one Langfuse *session* per Amplifier session (grouping all traces
+    together). Provider calls become Generation observations; tool calls become
+    Span observations.
+
+    Methods are synchronous — call them via ``asyncio.to_thread()`` from async
+    hook handlers to avoid blocking the event loop.
     """
 
-    def __init__(self, host: str, public_key: str, secret_key: str) -> None:
+    def __init__(
+        self,
+        host: str,
+        public_key: str,
+        secret_key: str,
+        timeout: int = 10,
+    ) -> None:
         # Strip stray quotes that can appear when values come from Amplifier
         # keys.yaml (which wraps values in "...") vs keys.env (already stripped).
         def _strip(v: str) -> str:
@@ -39,7 +61,6 @@ class LangfuseWriter:
         secret_key = _strip(secret_key)
 
         # Set env vars before get_client() so the singleton picks them up.
-        # Use setdefault so we don't stomp vars already in the environment.
         if public_key:
             os.environ["LANGFUSE_PUBLIC_KEY"] = public_key
         if secret_key:
@@ -50,82 +71,115 @@ class LangfuseWriter:
         try:
             from langfuse import Langfuse  # type: ignore[import]
 
-            self._lf = Langfuse()
+            self._lf = Langfuse(timeout=timeout)
         except ImportError as exc:
             raise ImportError(
                 "langfuse package not found. "
                 "Install with: pip install 'hook-observability[langfuse]'"
             ) from exc
 
-        # Active root-span tokens keyed by session_id.
+        # Root-span tokens keyed by session_id for the summary span.
         self._spans: dict[str, Any] = {}
 
     # ---------------------------------------------------------------- #
 
     def start_trace(self, session_id: str) -> None:
-        """Called on session:start."""
+        """Called on session:start — opens the root summary span."""
         try:
-            obs = self._lf.start_observation(
-                name="amplifier-session",
-                as_type="span",
-                metadata={"session_id": session_id},
-            )
+            from langfuse import propagate_attributes  # type: ignore[import]
+
+            with propagate_attributes(session_id=session_id):
+                obs = self._lf.start_observation(
+                    name="amplifier-session",
+                    as_type="span",
+                    metadata={"session_id": session_id},
+                )
             self._spans[session_id] = obs
         except Exception:
             logger.exception("Langfuse start_trace failed for %s", session_id)
 
-    def log_generation(self, session_id: str, record: dict[str, Any]) -> None:
-        """Called on provider:response."""
+    def log_generation(
+        self,
+        session_id: str,
+        record: dict[str, Any],
+        io_data: dict[str, Any] | None = None,
+    ) -> None:
+        """Called on provider:response.
+
+        Args:
+            session_id: Amplifier session ID (becomes Langfuse session ID).
+            record: Cost/usage record built by the hook.
+            io_data: Optional ``{"input": ..., "output": ...}`` with the raw
+                prompt messages and response content.  Only passed when
+                ``langfuse_log_io`` is enabled in config.
+        """
         try:
-            obs = self._lf.start_observation(
-                name=f"{record['provider']}/{record['model']}",
-                as_type="generation",
-            )
-            obs.update(
-                model=record["model"],
-                usage_details={
-                    "input": record["input_tokens"],
-                    "output": record["output_tokens"],
-                },
-                cost_details={
-                    "input": _split_cost(record, "input"),
-                    "output": _split_cost(record, "output"),
-                    "total": record["cost_usd"],
-                },
-                metadata={
-                    "session_id": session_id,
-                    "provider": record["provider"],
-                    "cache_read_tokens": record.get("cache_read_tokens", 0),
-                    "cache_write_tokens": record.get("cache_write_tokens", 0),
-                    "reasoning_tokens": record.get("reasoning_tokens", 0),
-                    "latency_ms": record.get("latency_ms"),
-                },
-            )
-            obs.end()
+            from langfuse import propagate_attributes  # type: ignore[import]
+
+            with propagate_attributes(session_id=session_id):
+                obs = self._lf.start_observation(
+                    name=f"{record['provider']}/{record['model']}",
+                    as_type="generation",
+                )
+                update_kwargs: dict[str, Any] = dict(
+                    model=record["model"],
+                    usage_details={
+                        "input": record["input_tokens"],
+                        "output": record["output_tokens"],
+                    },
+                    cost_details={
+                        "input": _split_cost(record, "input"),
+                        "output": _split_cost(record, "output"),
+                        "total": record["cost_usd"],
+                    },
+                    metadata={
+                        "session_id": session_id,
+                        "provider": record["provider"],
+                        "cache_read_tokens": record.get("cache_read_tokens", 0),
+                        "cache_write_tokens": record.get("cache_write_tokens", 0),
+                        "reasoning_tokens": record.get("reasoning_tokens", 0),
+                        "latency_ms": record.get("latency_ms"),
+                    },
+                )
+                if io_data is not None:
+                    if io_data.get("input") is not None:
+                        update_kwargs["input"] = io_data["input"]
+                    if io_data.get("output") is not None:
+                        update_kwargs["output"] = io_data["output"]
+                obs.update(**update_kwargs)
+                obs.end()
         except Exception:
             logger.exception("Langfuse log_generation failed")
 
     def log_span(self, session_id: str, record: dict[str, Any]) -> None:
         """Called on tool:post."""
         try:
-            obs = self._lf.start_observation(
-                name=record["tool_name"],
-                as_type="span",
-            )
-            obs.update(
-                metadata={
-                    "session_id": session_id,
-                    "success": record["success"],
-                    "latency_ms": record.get("latency_ms"),
-                },
-                level="DEFAULT" if record["success"] else "WARNING",
-            )
-            obs.end()
+            from langfuse import propagate_attributes  # type: ignore[import]
+
+            with propagate_attributes(session_id=session_id):
+                obs = self._lf.start_observation(
+                    name=record["tool_name"],
+                    as_type="span",
+                )
+                obs.update(
+                    metadata={
+                        "session_id": session_id,
+                        "success": record["success"],
+                        "latency_ms": record.get("latency_ms"),
+                    },
+                    level="DEFAULT" if record["success"] else "WARNING",
+                )
+                obs.end()
         except Exception:
             logger.exception("Langfuse log_span failed")
 
     def end_trace(self, session_id: str, summary: dict[str, Any]) -> None:
-        """Called on session:end."""
+        """Called on session:end — closes the root span and flushes.
+
+        ``flush()`` is blocking (waits for the OTel batch to drain).  This
+        method is intended to be called via ``asyncio.to_thread()`` so it
+        runs off the event loop.
+        """
         try:
             obs = self._spans.pop(session_id, None)
             if obs is not None:
@@ -143,6 +197,7 @@ class LangfuseWriter:
             logger.exception("Langfuse end_trace failed for %s", session_id)
 
     def flush(self) -> None:
+        """Blocking flush — call via ``asyncio.to_thread()``."""
         try:
             self._lf.flush()
         except Exception:

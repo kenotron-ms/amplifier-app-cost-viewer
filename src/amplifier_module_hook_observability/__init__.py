@@ -3,7 +3,7 @@
 Subscribes to provider and session lifecycle events, writes JSONL records
 locally, and optionally ships to Langfuse.
 
-Configuration (via bundle YAML):
+Configuration (via bundle YAML)::
 
     hooks:
       - module: hook-observability
@@ -15,13 +15,19 @@ Configuration (via bundle YAML):
           langfuse_host: "http://localhost:3000"
           langfuse_public_key: "pk-lf-..."
           langfuse_secret_key: "sk-lf-..."
+          langfuse_timeout: 10        # seconds; prevents read-timeout hangs
+          langfuse_log_io: false      # set true to capture full prompt + response
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .langfuse_writer import LangfuseWriter
 
 logger = logging.getLogger(__name__)
 
@@ -35,25 +41,30 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
     output_dir: str = config.get("output_dir", "~/.amplifier/observability")
     default_model: str = config.get("model", "unknown")
     langfuse_enabled: bool = bool(config.get("langfuse_enabled", False))
+    langfuse_timeout: int = int(config.get("langfuse_timeout", 10))
+    langfuse_log_io: bool = bool(config.get("langfuse_log_io", False))
 
     # --- Writers ---
     from .jsonl_writer import JSONLWriter
 
     jsonl = JSONLWriter(output_dir)
 
-    langfuse_writer = None
+    lf_writer: LangfuseWriter | None = None
     if langfuse_enabled:
         try:
-            from .langfuse_writer import LangfuseWriter
+            from .langfuse_writer import LangfuseWriter as _LangfuseWriter
 
-            langfuse_writer = LangfuseWriter(
+            lf_writer = _LangfuseWriter(
                 host=config.get("langfuse_host", "http://localhost:3000"),
                 public_key=config.get("langfuse_public_key", ""),
                 secret_key=config.get("langfuse_secret_key", ""),
+                timeout=langfuse_timeout,
             )
             logger.info(
-                "hook-observability: Langfuse enabled -> %s",
+                "hook-observability: Langfuse enabled -> %s (timeout=%ds, log_io=%s)",
                 config.get("langfuse_host"),
+                langfuse_timeout,
+                langfuse_log_io,
             )
         except ImportError:
             logger.warning(
@@ -89,7 +100,7 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
     # ------------------------------------------------------------------ #
 
     async def on_session_start(event: str, data: dict[str, Any]) -> Any:
-        from amplifier_core import HookResult
+        from amplifier_core import HookResult  # type: ignore[import]
 
         sid: str = data.get("session_id", "unknown")
         state[sid] = {
@@ -104,12 +115,12 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
             "current_model": default_model,
             "current_provider": "unknown",
         }
-        if langfuse_writer is not None:
-            langfuse_writer.start_trace(sid)
+        if lf_writer is not None:
+            await asyncio.to_thread(lf_writer.start_trace, sid)
         return HookResult(action="continue")
 
     async def on_session_end(event: str, data: dict[str, Any]) -> Any:
-        from amplifier_core import HookResult
+        from amplifier_core import HookResult  # type: ignore[import]
 
         sid: str = data.get("session_id", "unknown")
         s = state.pop(sid, {})
@@ -126,8 +137,9 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
             "tool_calls": s.get("tool_calls", 0),
         }
         jsonl.write(record)
-        if langfuse_writer is not None:
-            langfuse_writer.end_trace(sid, record)
+        if lf_writer is not None:
+            # end_trace calls flush() — run off the event loop so we don't block.
+            await asyncio.to_thread(lf_writer.end_trace, sid, record)
         return HookResult(action="continue")
 
     async def on_llm_response(event: str, data: dict[str, Any]) -> Any:
@@ -137,7 +149,7 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
           "input" / "output" / "cache_read" / "cache_write"
         and does not carry session_id, so we fall back to coordinator.session_id.
         """
-        from amplifier_core import HookResult
+        from amplifier_core import HookResult  # type: ignore[import]
         from .pricing import compute_cost
 
         # llm:response has no session_id — fall back to this session's ID
@@ -159,17 +171,27 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
         # llm:response uses short keys: "input", "output", "cache_read", "cache_write"
         input_tok = _usage_int(usage, "input") or _usage_int(usage, "input_tokens")
         output_tok = _usage_int(usage, "output") or _usage_int(usage, "output_tokens")
-        cache_read = _usage_int(usage, "cache_read") or _usage_int(usage, "cache_read_tokens")
-        cache_write = _usage_int(usage, "cache_write") or _usage_int(usage, "cache_write_tokens")
-        reasoning = _usage_int(usage, "reasoning") or _usage_int(usage, "reasoning_tokens")
+        cache_read = _usage_int(usage, "cache_read") or _usage_int(
+            usage, "cache_read_tokens"
+        )
+        cache_write = _usage_int(usage, "cache_write") or _usage_int(
+            usage, "cache_write_tokens"
+        )
+        reasoning = _usage_int(usage, "reasoning") or _usage_int(
+            usage, "reasoning_tokens"
+        )
 
         model = data.get("model") or s.get("current_model", default_model)
         provider = data.get("provider") or s.get("current_provider", "unknown")
-        cost = compute_cost(model, input_tok, output_tok, cache_read, cache_write, reasoning)
+        cost = compute_cost(
+            model, input_tok, output_tok, cache_read, cache_write, reasoning
+        )
 
         # duration_ms is provided directly in the llm:response event
         duration_ms = data.get("duration_ms")
-        latency_ms: float | None = round(float(duration_ms), 1) if duration_ms is not None else None
+        latency_ms: float | None = (
+            round(float(duration_ms), 1) if duration_ms is not None else None
+        )
 
         s["total_input_tokens"] += input_tok
         s["total_output_tokens"] += output_tok
@@ -192,12 +214,42 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
             "latency_ms": latency_ms,
         }
         jsonl.write(record)
-        if langfuse_writer is not None:
-            langfuse_writer.log_generation(sid, record)
+        if lf_writer is not None:
+            io_data: dict[str, Any] | None = None
+            if langfuse_log_io:
+                # Drain per-call state accumulated by prompt:submit and content_block:end.
+                pending_input: str | None = s.pop("pending_input", None)
+                out_parts: list[str] = s.pop("pending_output_parts", None) or []
+                tool_uses: list[dict[str, Any]] = s.pop("pending_tool_uses", None) or []
+
+                lf_input = (
+                    [{"role": "user", "content": pending_input}]
+                    if pending_input
+                    else None
+                )
+
+                # Build structured output: text first, then tool calls.
+                out_content: list[Any] = []
+                if out_parts:
+                    out_content.append({"type": "text", "text": "".join(out_parts)})
+                out_content.extend(tool_uses)
+
+                lf_output: Any = None
+                if out_content:
+                    # If it's just one plain text block, flatten to a string —
+                    # Langfuse renders plain strings more cleanly in the UI.
+                    lf_output = (
+                        out_content[0]["text"]
+                        if len(out_content) == 1 and out_content[0].get("type") == "text"
+                        else {"role": "assistant", "content": out_content}
+                    )
+
+                io_data = {"input": lf_input, "output": lf_output}
+            await asyncio.to_thread(lf_writer.log_generation, sid, record, io_data)
         return HookResult(action="continue")
 
     async def on_tool_pre(event: str, data: dict[str, Any]) -> Any:
-        from amplifier_core import HookResult
+        from amplifier_core import HookResult  # type: ignore[import]
 
         sid: str = data.get("session_id", "unknown")
         if sid in state:
@@ -205,7 +257,7 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
         return HookResult(action="continue")
 
     async def on_tool_post(event: str, data: dict[str, Any]) -> Any:
-        from amplifier_core import HookResult
+        from amplifier_core import HookResult  # type: ignore[import]
 
         sid: str = data.get("session_id", "unknown")
         s = state.get(sid, {})
@@ -233,8 +285,45 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
             "latency_ms": latency_ms,
         }
         jsonl.write(record)
-        if langfuse_writer is not None:
-            langfuse_writer.log_span(sid, record)
+        if lf_writer is not None:
+            await asyncio.to_thread(lf_writer.log_span, sid, record)
+        return HookResult(action="continue")
+
+    async def on_prompt_submit(event: str, data: dict[str, Any]) -> Any:
+        """Capture the user prompt before the LLM call — input for Langfuse generation."""
+        from amplifier_core import HookResult  # type: ignore[import]
+
+        sid = coordinator.session_id or "unknown"
+        if sid in state:
+            prompt = data.get("prompt", "")
+            if prompt:
+                state[sid]["pending_input"] = prompt
+        return HookResult(action="continue")
+
+    async def on_content_block_end(event: str, data: dict[str, Any]) -> Any:
+        """Accumulate LLM output blocks — output for Langfuse generation."""
+        from amplifier_core import HookResult  # type: ignore[import]
+
+        sid = coordinator.session_id or "unknown"
+        if sid not in state:
+            return HookResult(action="continue")
+
+        block = data.get("block") or {}
+        btype = block.get("type", "")
+
+        if btype == "text":
+            text = block.get("text", "")
+            if text:
+                state[sid].setdefault("pending_output_parts", []).append(text)
+        elif btype == "tool_use":
+            # Include structured tool calls so Langfuse shows what the model invoked.
+            state[sid].setdefault("pending_tool_uses", []).append(
+                {
+                    "type": "tool_use",
+                    "name": block.get("name", ""),
+                    "input": block.get("input", {}),
+                }
+            )
         return HookResult(action="continue")
 
     # ------------------------------------------------------------------ #
@@ -254,6 +343,19 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
     )
     hooks.register("tool:pre", on_tool_pre, priority=5, name="obs-tool-pre")
     hooks.register("tool:post", on_tool_post, priority=90, name="obs-tool-post")
+
+    # IO capture handlers — only wired up when langfuse_log_io is enabled
+    # to avoid accumulating state we'll never consume.
+    if langfuse_log_io and lf_writer is not None:
+        hooks.register(
+            "prompt:submit", on_prompt_submit, priority=5, name="obs-prompt-submit"
+        )
+        hooks.register(
+            "content_block:end",
+            on_content_block_end,
+            priority=95,
+            name="obs-content-block-end",
+        )
 
     logger.info(
         "hook-observability mounted -- output_dir=%s langfuse=%s",

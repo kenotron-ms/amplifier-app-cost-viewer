@@ -20,6 +20,9 @@ hooks:
       langfuse_host: ${LANGFUSE_HOST}
       langfuse_public_key: ${LANGFUSE_PUBLIC_KEY}
       langfuse_secret_key: ${LANGFUSE_SECRET_KEY}
+      langfuse_log_io: true
+      langfuse_timeout: 10       # seconds before read timeout; default 10
+      langfuse_log_io: false     # set true to capture full prompt + response in Langfuse
 ---
 
 # hook-observability Development
