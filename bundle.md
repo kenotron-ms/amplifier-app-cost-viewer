@@ -16,12 +16,20 @@ hooks:
     source: ./src
     config:
       output_dir: "~/.amplifier/observability"
-      langfuse_enabled: true
+
+      # Set true to capture full prompt + response + tool IO in JSONL.
+      # The JSONL file is the primary source of truth — readable by any tool.
+      # With log_io=true each provider_call record gains "input"/"output" fields
+      # and each tool_call record gains "input"/"output" fields.
+      log_io: true
+
+      # Langfuse is fully optional. Disable it and you lose nothing —
+      # all data is already in the JSONL.
+      langfuse_enabled: false
       langfuse_host: ${LANGFUSE_HOST}
       langfuse_public_key: ${LANGFUSE_PUBLIC_KEY}
       langfuse_secret_key: ${LANGFUSE_SECRET_KEY}
-      langfuse_timeout: 10       # seconds before read timeout; default 10
-      langfuse_log_io: true      # capture full prompt + response in Langfuse
+      langfuse_timeout: 10
 ---
 
 # hook-observability Development

@@ -1,7 +1,10 @@
 """Amplifier hook module for token cost observability.
 
-Subscribes to provider and session lifecycle events, writes JSONL records
-locally, and optionally ships to Langfuse.
+Subscribes to provider and session lifecycle events and writes JSONL records
+to ``~/.amplifier/observability/<session_id>.jsonl``.  The JSONL file is the
+primary source of truth — it is self-contained and readable by any tool.
+
+Langfuse is an *optional* secondary sink.  Disabling it loses nothing.
 
 Configuration (via bundle YAML)::
 
@@ -10,13 +13,71 @@ Configuration (via bundle YAML)::
         source: ./src
         config:
           output_dir: "~/.amplifier/observability"  # JSONL destination
-          model: "claude-sonnet-4-5"                # fallback if not in response
+          model: "claude-sonnet-4-5"                # fallback if not in event
+          log_io: false     # set true to capture prompt + response + tool IO
+                            # in JSONL (and Langfuse if enabled).  Produces
+                            # richer records; fine to enable permanently.
+
+          # Langfuse is fully optional — leave langfuse_enabled: false
+          # to use only the local JSONL log.
           langfuse_enabled: false
           langfuse_host: "http://localhost:3000"
           langfuse_public_key: "pk-lf-..."
           langfuse_secret_key: "sk-lf-..."
-          langfuse_timeout: 10        # seconds; prevents read-timeout hangs
-          langfuse_log_io: false      # set true to capture full prompt + response
+          langfuse_timeout: 10
+
+JSONL record shapes
+-------------------
+
+provider_call (always)::
+
+    {
+      "ts": "2026-04-24T17:00:00Z",
+      "type": "provider_call",
+      "session_id": "...",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "input_tokens": 512,
+      "output_tokens": 128,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "reasoning_tokens": 0,
+      "total_tokens": 640,
+      "cost_usd": 0.003456,
+      "latency_ms": 2100.0,
+      // when log_io=true:
+      "input": [{"role": "user", "content": "..."}],
+      "output": "..."
+    }
+
+tool_call (always)::
+
+    {
+      "ts": "...",
+      "type": "tool_call",
+      "session_id": "...",
+      "tool_name": "bash",
+      "success": true,
+      "latency_ms": 342.0,
+      // when log_io=true:
+      "input": {"command": "ls -la"},
+      "output": "total 208\\n..."
+    }
+
+session_summary (on session:end)::
+
+    {
+      "ts": "...",
+      "type": "session_summary",
+      "session_id": "...",
+      "duration_s": 42.3,
+      "total_input_tokens": 8192,
+      "total_output_tokens": 2048,
+      "total_cost_usd": 0.08,
+      "provider_calls": 12,
+      "tool_calls": 34,
+      "parent_session_id": "..."   // only present for child sessions
+    }
 """
 
 from __future__ import annotations
@@ -40,9 +101,13 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
 
     output_dir: str = config.get("output_dir", "~/.amplifier/observability")
     default_model: str = config.get("model", "unknown")
+
+    # log_io controls IO capture for ALL sinks (JSONL + Langfuse if enabled).
+    # Accept legacy key langfuse_log_io for backward compatibility.
+    log_io: bool = bool(config.get("log_io", config.get("langfuse_log_io", False)))
+
     langfuse_enabled: bool = bool(config.get("langfuse_enabled", False))
     langfuse_timeout: int = int(config.get("langfuse_timeout", 10))
-    langfuse_log_io: bool = bool(config.get("langfuse_log_io", False))
 
     # --- Writers ---
     from .jsonl_writer import JSONLWriter
@@ -61,10 +126,9 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
                 timeout=langfuse_timeout,
             )
             logger.info(
-                "hook-observability: Langfuse enabled -> %s (timeout=%ds, log_io=%s)",
+                "hook-observability: Langfuse enabled -> %s (timeout=%ds)",
                 config.get("langfuse_host"),
                 langfuse_timeout,
-                langfuse_log_io,
             )
         except ImportError:
             logger.warning(
@@ -78,9 +142,8 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
             ok = await asyncio.to_thread(lf_writer._lf.auth_check)
             if ok:
                 logger.info(
-                    "hook-observability: Langfuse connection OK -> %s (io=%s)",
+                    "hook-observability: Langfuse connection OK -> %s",
                     config.get("langfuse_host"),
-                    langfuse_log_io,
                 )
             else:
                 logger.warning(
@@ -102,16 +165,14 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
     #  Small helpers                                                       #
     # ------------------------------------------------------------------ #
 
-    _MAX_TOOL_OUTPUT = 4_000  # chars — keep Langfuse readable
+    _MAX_IO_CHARS = 8_000  # chars — keep records scannable
 
-    def _truncate(value: Any, limit: int = _MAX_TOOL_OUTPUT) -> Any:
-        """Truncate strings/dicts so Langfuse stays readable."""
+    def _truncate(value: Any, limit: int = _MAX_IO_CHARS) -> Any:
+        """Truncate long string values so logs stay scannable."""
         if value is None:
             return None
-        if isinstance(value, str):
-            if len(value) > limit:
-                return value[:limit] + f"\n…[truncated {len(value) - limit} chars]"
-            return value
+        if isinstance(value, str) and len(value) > limit:
+            return value[:limit] + f"\n…[truncated {len(value) - limit} chars]"
         return value
 
     def _usage_int(usage: Any, field: str) -> int:
@@ -122,13 +183,6 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
         if isinstance(usage, dict):
             return int(usage.get(field) or 0)
         return 0
-
-    def _model_from_response(response: Any, fallback: str) -> str:
-        if response is not None and hasattr(response, "metadata"):
-            meta = response.metadata
-            if isinstance(meta, dict):
-                return meta.get("model", fallback)
-        return fallback
 
     # ------------------------------------------------------------------ #
     #  Handlers                                                            #
@@ -261,39 +315,46 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
             "cost_usd": round(cost, 6),
             "latency_ms": latency_ms,
         }
-        jsonl.write(record)
-        if lf_writer is not None:
-            io_data: dict[str, Any] | None = None
-            if langfuse_log_io:
-                # Drain per-call state accumulated by prompt:submit and content_block:end.
-                pending_input: str | None = s.pop("pending_input", None)
-                out_parts: list[str] = s.pop("pending_output_parts", None) or []
-                tool_uses: list[dict[str, Any]] = s.pop("pending_tool_uses", None) or []
 
-                lf_input = (
-                    [{"role": "user", "content": pending_input}]
-                    if pending_input
-                    else None
+        # Drain IO state captured by prompt:submit / content_block:end handlers.
+        # This runs whenever log_io=true, regardless of whether Langfuse is on.
+        io_data: dict[str, Any] | None = None
+        if log_io:
+            pending_input: str | None = s.pop("pending_input", None)
+            out_parts: list[str] = s.pop("pending_output_parts", None) or []
+            tool_uses: list[dict[str, Any]] = s.pop("pending_tool_uses", None) or []
+
+            lf_input = (
+                [{"role": "user", "content": pending_input}] if pending_input else None
+            )
+
+            # Build structured output: text first, then tool calls.
+            out_content: list[Any] = []
+            if out_parts:
+                out_content.append({"type": "text", "text": "".join(out_parts)})
+            out_content.extend(tool_uses)
+
+            lf_output: Any = None
+            if out_content:
+                # Flatten single plain-text block to a string — cleaner in both
+                # JSONL and Langfuse UI.
+                lf_output = (
+                    out_content[0]["text"]
+                    if len(out_content) == 1 and out_content[0].get("type") == "text"
+                    else {"role": "assistant", "content": out_content}
                 )
 
-                # Build structured output: text first, then tool calls.
-                out_content: list[Any] = []
-                if out_parts:
-                    out_content.append({"type": "text", "text": "".join(out_parts)})
-                out_content.extend(tool_uses)
+            io_data = {"input": lf_input, "output": lf_output}
+            # Enrich the JSONL record with IO so the file is self-contained.
+            if lf_input is not None:
+                record["input"] = lf_input
+            if lf_output is not None:
+                record["output"] = lf_output
 
-                lf_output: Any = None
-                if out_content:
-                    # If it's just one plain text block, flatten to a string —
-                    # Langfuse renders plain strings more cleanly in the UI.
-                    lf_output = (
-                        out_content[0]["text"]
-                        if len(out_content) == 1
-                        and out_content[0].get("type") == "text"
-                        else {"role": "assistant", "content": out_content}
-                    )
+        # JSONL is always written first — it is the primary sink.
+        jsonl.write(record)
 
-                io_data = {"input": lf_input, "output": lf_output}
+        if lf_writer is not None:
             await asyncio.to_thread(lf_writer.log_generation, sid, record, io_data)
         return HookResult(action="continue")
 
@@ -322,9 +383,6 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
         success = True
         if isinstance(result_data, dict):
             success = bool(result_data.get("success", True))
-        elif result_data is not None:
-            # String form — assume success; errors are typically dicts.
-            success = True
 
         s["tool_calls"] = s.get("tool_calls", 0) + 1
 
@@ -335,9 +393,10 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
             "success": success,
             "latency_ms": latency_ms,
         }
-        jsonl.write(record)
-        if lf_writer is not None:
-            # Build tool IO for Langfuse — truncate large outputs so Langfuse stays readable.
+
+        # Capture tool IO when log_io=true — goes into JSONL AND Langfuse.
+        io_data: dict[str, Any] | None = None
+        if log_io:
             tool_input = data.get("tool_input")
             tool_output: Any = None
             if isinstance(result_data, dict):
@@ -345,19 +404,28 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
                 tool_output = _truncate(raw)
             elif result_data is not None:
                 tool_output = _truncate(str(result_data))
-            io_data: dict[str, Any] | None = None
+
+            if tool_input is not None:
+                record["input"] = tool_input
+            if tool_output is not None:
+                record["output"] = tool_output
             if tool_input is not None or tool_output is not None:
                 io_data = {"input": tool_input, "output": tool_output}
+
+        # JSONL is always written first — it is the primary sink.
+        jsonl.write(record)
+
+        if lf_writer is not None:
             await asyncio.to_thread(lf_writer.log_span, sid, record, io_data)
         return HookResult(action="continue")
 
     async def on_prompt_submit(event: str, data: dict[str, Any]) -> Any:
-        """Capture the user prompt before the LLM call — input for Langfuse generation."""
+        """Capture the user prompt before the LLM call — stored for IO logging."""
         from amplifier_core import HookResult  # type: ignore[import]
 
         sid = coordinator.session_id or "unknown"
         if sid not in state:
-            # Fallback: if state has exactly one session, use it (handles ID mismatch edge cases).
+            # Fallback: if state has exactly one session, use it.
             if len(state) == 1:
                 sid = next(iter(state))
             else:
@@ -376,12 +444,12 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
         return HookResult(action="continue")
 
     async def on_content_block_end(event: str, data: dict[str, Any]) -> Any:
-        """Accumulate LLM output blocks — output for Langfuse generation."""
+        """Accumulate LLM output blocks — stored for IO logging."""
         from amplifier_core import HookResult  # type: ignore[import]
 
         sid = coordinator.session_id or "unknown"
         if sid not in state:
-            # Fallback: if state has exactly one session, use it (handles ID mismatch edge cases).
+            # Fallback: if state has exactly one session, use it.
             if len(state) == 1:
                 sid = next(iter(state))
             else:
@@ -395,7 +463,6 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
             if text:
                 state[sid].setdefault("pending_output_parts", []).append(text)
         elif btype == "tool_use":
-            # Include structured tool calls so Langfuse shows what the model invoked.
             state[sid].setdefault("pending_tool_uses", []).append(
                 {
                     "type": "tool_use",
@@ -423,9 +490,9 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
     hooks.register("tool:pre", on_tool_pre, priority=5, name="obs-tool-pre")
     hooks.register("tool:post", on_tool_post, priority=90, name="obs-tool-post")
 
-    # IO capture handlers — only wired up when langfuse_log_io is enabled
-    # to avoid accumulating state we'll never consume.
-    if langfuse_log_io and lf_writer is not None:
+    # IO capture handlers — only wired when log_io=true to avoid accumulating
+    # state we'll never consume.
+    if log_io:
         hooks.register(
             "prompt:submit", on_prompt_submit, priority=5, name="obs-prompt-submit"
         )
@@ -437,7 +504,8 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
         )
 
     logger.info(
-        "hook-observability mounted -- output_dir=%s langfuse=%s",
+        "hook-observability mounted -- output_dir=%s log_io=%s langfuse=%s",
         output_dir,
+        log_io,
         langfuse_enabled,
     )
