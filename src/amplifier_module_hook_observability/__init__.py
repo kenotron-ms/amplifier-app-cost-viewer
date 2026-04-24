@@ -103,20 +103,30 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
         from amplifier_core import HookResult  # type: ignore[import]
 
         sid: str = data.get("session_id", "unknown")
+
+        # Resolve parent_id: event data takes precedence, then coordinator attribute.
+        parent_id: str | None = (
+            data.get("parent_id")
+            or data.get("parent_session_id")
+            or getattr(coordinator, "parent_id", None)
+        )
+
         state[sid] = {
+            "parent_session_id": parent_id,
             "start_time": time.perf_counter(),
             "total_input_tokens": 0,
             "total_output_tokens": 0,
             "total_cost_usd": 0.0,
             "provider_calls": 0,
             "tool_calls": 0,
-            "llm_start": None,
             "tool_start": None,
             "current_model": default_model,
             "current_provider": "unknown",
         }
         if lf_writer is not None:
-            await asyncio.to_thread(lf_writer.start_trace, sid)
+            await asyncio.to_thread(
+                lf_writer.start_trace, sid, parent_session_id=parent_id
+            )
         return HookResult(action="continue")
 
     async def on_session_end(event: str, data: dict[str, Any]) -> Any:
@@ -136,6 +146,9 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
             "provider_calls": s.get("provider_calls", 0),
             "tool_calls": s.get("tool_calls", 0),
         }
+        # Include parent link so JSONL logs carry the full delegation chain.
+        if s.get("parent_session_id"):
+            record["parent_session_id"] = s["parent_session_id"]
         jsonl.write(record)
         if lf_writer is not None:
             # end_trace calls flush() — run off the event loop so we don't block.
@@ -240,7 +253,8 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
                     # Langfuse renders plain strings more cleanly in the UI.
                     lf_output = (
                         out_content[0]["text"]
-                        if len(out_content) == 1 and out_content[0].get("type") == "text"
+                        if len(out_content) == 1
+                        and out_content[0].get("type") == "text"
                         else {"role": "assistant", "content": out_content}
                     )
 
