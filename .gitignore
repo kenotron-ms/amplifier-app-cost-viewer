@@ -1,1 +1,11 @@
-*.pyc\n__pycache__/\n*.pyo\n.env\n.venv/\ndist/\n*.egg-info/\n.ruff_cache/
+*.pyc
+__pycache__/
+*.pyo
+.env
+.venv/
+dist/
+*.egg-info/
+.ruff_cache/
+
+# Amplifier local settings (personal overrides, don't commit)
+.amplifier/settings.local.yaml

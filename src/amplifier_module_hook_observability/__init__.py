@@ -7,7 +7,7 @@ Configuration (via bundle YAML):
 
     hooks:
       - module: hook-observability
-        source: ./
+        source: ./src
         config:
           output_dir: "~/.amplifier/observability"  # JSONL destination
           model: "claude-sonnet-4-5"                # fallback if not in response
@@ -130,51 +130,46 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
             langfuse_writer.end_trace(sid, record)
         return HookResult(action="continue")
 
-    async def on_provider_request(event: str, data: dict[str, Any]) -> Any:
-        from amplifier_core import HookResult
+    async def on_llm_response(event: str, data: dict[str, Any]) -> Any:
+        """Handle llm:response — fired by providers with actual usage data.
 
-        sid: str = data.get("session_id", "unknown")
-        if sid in state:
-            state[sid]["llm_start"] = time.perf_counter()
-            state[sid]["current_provider"] = data.get("provider", "unknown")
-        return HookResult(action="continue")
-
-    async def on_provider_response(event: str, data: dict[str, Any]) -> Any:
+        The llm:response event uses short keys in the usage dict:
+          "input" / "output" / "cache_read" / "cache_write"
+        and does not carry session_id, so we fall back to coordinator.session_id.
+        """
         from amplifier_core import HookResult
         from .pricing import compute_cost
 
-        sid: str = data.get("session_id", "unknown")
+        # llm:response has no session_id — fall back to this session's ID
+        sid: str = data.get("session_id") or coordinator.session_id or "unknown"
         s = state.get(sid)
         if s is None:
-            # Hook loaded mid-session — create a stub entry so we still log.
+            # Hook mounted mid-session — create a stub so we still log.
             s = {
                 "total_input_tokens": 0,
                 "total_output_tokens": 0,
                 "total_cost_usd": 0.0,
                 "provider_calls": 0,
-                "llm_start": None,
                 "current_provider": data.get("provider", "unknown"),
                 "current_model": default_model,
             }
             state[sid] = s
 
-        usage = data.get("usage")
-        input_tok = _usage_int(usage, "input_tokens")
-        output_tok = _usage_int(usage, "output_tokens")
-        cache_read = _usage_int(usage, "cache_read_tokens")
-        cache_write = _usage_int(usage, "cache_write_tokens")
-        reasoning = _usage_int(usage, "reasoning_tokens")
+        usage = data.get("usage") or {}
+        # llm:response uses short keys: "input", "output", "cache_read", "cache_write"
+        input_tok = _usage_int(usage, "input") or _usage_int(usage, "input_tokens")
+        output_tok = _usage_int(usage, "output") or _usage_int(usage, "output_tokens")
+        cache_read = _usage_int(usage, "cache_read") or _usage_int(usage, "cache_read_tokens")
+        cache_write = _usage_int(usage, "cache_write") or _usage_int(usage, "cache_write_tokens")
+        reasoning = _usage_int(usage, "reasoning") or _usage_int(usage, "reasoning_tokens")
 
-        model = _model_from_response(data.get("response"), s["current_model"])
-        provider = data.get("provider", s.get("current_provider", "unknown"))
-        cost = compute_cost(
-            model, input_tok, output_tok, cache_read, cache_write, reasoning
-        )
+        model = data.get("model") or s.get("current_model", default_model)
+        provider = data.get("provider") or s.get("current_provider", "unknown")
+        cost = compute_cost(model, input_tok, output_tok, cache_read, cache_write, reasoning)
 
-        latency_ms: float | None = None
-        if s.get("llm_start") is not None:
-            latency_ms = round((time.perf_counter() - s["llm_start"]) * 1000, 1)
-            s["llm_start"] = None
+        # duration_ms is provided directly in the llm:response event
+        duration_ms = data.get("duration_ms")
+        latency_ms: float | None = round(float(duration_ms), 1) if duration_ms is not None else None
 
         s["total_input_tokens"] += input_tok
         s["total_output_tokens"] += output_tok
@@ -252,13 +247,10 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
     )
     hooks.register("session:end", on_session_end, priority=95, name="obs-session-end")
     hooks.register(
-        "provider:request", on_provider_request, priority=5, name="obs-provider-request"
-    )
-    hooks.register(
-        "provider:response",
-        on_provider_response,
+        "llm:response",
+        on_llm_response,
         priority=90,
-        name="obs-provider-response",
+        name="obs-llm-response",
     )
     hooks.register("tool:pre", on_tool_pre, priority=5, name="obs-tool-pre")
     hooks.register("tool:post", on_tool_post, priority=90, name="obs-tool-post")

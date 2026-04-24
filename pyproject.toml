@@ -16,10 +16,10 @@
     dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
     [project.entry-points."amplifier.modules"]
-    hook-observability = "hook_observability:mount"
+    hook-observability = "amplifier_module_hook_observability:mount"
 
     [tool.hatch.build.targets.wheel]
-    packages = ["src/hook_observability"]
+    packages = ["src/amplifier_module_hook_observability"]
 
     [tool.pytest.ini_options]
     testpaths = ["tests"]
