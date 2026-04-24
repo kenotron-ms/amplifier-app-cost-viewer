@@ -72,6 +72,29 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
                 "installed. Install with: pip install 'hook-observability[langfuse]'"
             )
 
+    # Startup auth check — surface problems immediately rather than silently.
+    if lf_writer is not None:
+        try:
+            ok = await asyncio.to_thread(lf_writer._lf.auth_check)
+            if ok:
+                logger.info(
+                    "hook-observability: Langfuse connection OK -> %s (io=%s)",
+                    config.get("langfuse_host"),
+                    langfuse_log_io,
+                )
+            else:
+                logger.warning(
+                    "hook-observability: Langfuse auth FAILED for %s — "
+                    "check LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY",
+                    config.get("langfuse_host"),
+                )
+        except Exception as exc:
+            logger.warning(
+                "hook-observability: Langfuse unreachable at %s: %s",
+                config.get("langfuse_host"),
+                exc,
+            )
+
     # --- Per-session state (keyed by session_id) ---
     state: dict[str, dict[str, Any]] = {}
 
@@ -308,10 +331,23 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
         from amplifier_core import HookResult  # type: ignore[import]
 
         sid = coordinator.session_id or "unknown"
-        if sid in state:
-            prompt = data.get("prompt", "")
-            if prompt:
-                state[sid]["pending_input"] = prompt
+        if sid not in state:
+            # Fallback: if state has exactly one session, use it (handles ID mismatch edge cases).
+            if len(state) == 1:
+                sid = next(iter(state))
+            else:
+                logger.debug(
+                    "on_prompt_submit: session %s not in state (keys=%s)",
+                    sid,
+                    list(state),
+                )
+                return HookResult(action="continue")
+        prompt = data.get("prompt", "")
+        if prompt:
+            state[sid]["pending_input"] = prompt
+            logger.debug(
+                "on_prompt_submit: captured %d chars for session %s", len(prompt), sid
+            )
         return HookResult(action="continue")
 
     async def on_content_block_end(event: str, data: dict[str, Any]) -> Any:
@@ -320,7 +356,11 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
 
         sid = coordinator.session_id or "unknown"
         if sid not in state:
-            return HookResult(action="continue")
+            # Fallback: if state has exactly one session, use it (handles ID mismatch edge cases).
+            if len(state) == 1:
+                sid = next(iter(state))
+            else:
+                return HookResult(action="continue")
 
         block = data.get("block") or {}
         btype = block.get("type", "")
