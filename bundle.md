@@ -16,6 +16,10 @@ hooks:
     source: ./src
     config:
       output_dir: "~/.amplifier/observability"
+      langfuse_enabled: true
+      langfuse_host: ${LANGFUSE_HOST}
+      langfuse_public_key: ${LANGFUSE_PUBLIC_KEY}
+      langfuse_secret_key: ${LANGFUSE_SECRET_KEY}
 ---
 
 # hook-observability Development

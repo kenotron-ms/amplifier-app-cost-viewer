@@ -29,19 +29,28 @@ class LangfuseWriter:
     """
 
     def __init__(self, host: str, public_key: str, secret_key: str) -> None:
+        # Strip stray quotes that can appear when values come from Amplifier
+        # keys.yaml (which wraps values in "...") vs keys.env (already stripped).
+        def _strip(v: str) -> str:
+            return v.strip('"').strip("'").strip()
+
+        host = _strip(host)
+        public_key = _strip(public_key)
+        secret_key = _strip(secret_key)
+
         # Set env vars before get_client() so the singleton picks them up.
         # Use setdefault so we don't stomp vars already in the environment.
         if public_key:
-            os.environ.setdefault("LANGFUSE_PUBLIC_KEY", public_key)
+            os.environ["LANGFUSE_PUBLIC_KEY"] = public_key
         if secret_key:
-            os.environ.setdefault("LANGFUSE_SECRET_KEY", secret_key)
+            os.environ["LANGFUSE_SECRET_KEY"] = secret_key
         if host:
-            os.environ.setdefault("LANGFUSE_HOST", host)
+            os.environ["LANGFUSE_HOST"] = host
 
         try:
-            from langfuse import get_client  # type: ignore[import]
+            from langfuse import Langfuse  # type: ignore[import]
 
-            self._lf = get_client()
+            self._lf = Langfuse()
         except ImportError as exc:
             raise ImportError(
                 "langfuse package not found. "
@@ -56,7 +65,6 @@ class LangfuseWriter:
     def start_trace(self, session_id: str) -> None:
         """Called on session:start."""
         try:
-            self._lf.propagate_attributes(session_id=session_id)
             obs = self._lf.start_observation(
                 name="amplifier-session",
                 as_type="span",
