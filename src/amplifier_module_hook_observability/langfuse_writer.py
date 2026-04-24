@@ -235,10 +235,22 @@ class LangfuseWriter:
         except Exception:
             logger.exception("Langfuse log_generation failed")
 
-    def log_span(self, session_id: str, record: dict[str, Any]) -> None:
+    def log_span(
+        self,
+        session_id: str,
+        record: dict[str, Any],
+        io_data: dict[str, Any] | None = None,
+    ) -> None:
         """Called on tool:post.
 
         Creates a Span observation nested under the session's root span.
+
+        Args:
+            session_id: Amplifier session ID.
+            record: Tool call record built by the hook.
+            io_data: Optional ``{"input": ..., "output": ...}`` with the tool
+                arguments and result content.  Passed when the orchestrator
+                provides ``tool_input`` / ``result`` in the event data.
         """
         try:
             from langfuse import propagate_attributes  # type: ignore[import]
@@ -257,7 +269,7 @@ class LangfuseWriter:
                         name=record["tool_name"],
                         as_type="span",
                     )
-                obs.update(
+                update_kwargs: dict[str, Any] = dict(
                     metadata={
                         "session_id": session_id,
                         "success": record["success"],
@@ -265,6 +277,12 @@ class LangfuseWriter:
                     },
                     level="DEFAULT" if record["success"] else "WARNING",
                 )
+                if io_data is not None:
+                    if io_data.get("input") is not None:
+                        update_kwargs["input"] = io_data["input"]
+                    if io_data.get("output") is not None:
+                        update_kwargs["output"] = io_data["output"]
+                obs.update(**update_kwargs)
                 obs.end()
         except Exception:
             logger.exception("Langfuse log_span failed")

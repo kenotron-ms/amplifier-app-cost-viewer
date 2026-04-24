@@ -102,6 +102,18 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
     #  Small helpers                                                       #
     # ------------------------------------------------------------------ #
 
+    _MAX_TOOL_OUTPUT = 4_000  # chars — keep Langfuse readable
+
+    def _truncate(value: Any, limit: int = _MAX_TOOL_OUTPUT) -> Any:
+        """Truncate strings/dicts so Langfuse stays readable."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            if len(value) > limit:
+                return value[:limit] + f"\n…[truncated {len(value) - limit} chars]"
+            return value
+        return value
+
     def _usage_int(usage: Any, field: str) -> int:
         if usage is None:
             return 0
@@ -304,13 +316,15 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
             latency_ms = round((time.perf_counter() - s["tool_start"]) * 1000, 1)
             s["tool_start"] = None
 
-        tool_result = data.get("tool_result")
+        # The orchestrator sends the result under "result" (not "tool_result").
+        # result_data is already serialized: model_dump() dict or str.
+        result_data = data.get("result")
         success = True
-        if tool_result is not None:
-            if hasattr(tool_result, "success"):
-                success = bool(tool_result.success)
-            elif isinstance(tool_result, dict):
-                success = bool(tool_result.get("success", True))
+        if isinstance(result_data, dict):
+            success = bool(result_data.get("success", True))
+        elif result_data is not None:
+            # String form — assume success; errors are typically dicts.
+            success = True
 
         s["tool_calls"] = s.get("tool_calls", 0) + 1
 
@@ -323,7 +337,18 @@ async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
         }
         jsonl.write(record)
         if lf_writer is not None:
-            await asyncio.to_thread(lf_writer.log_span, sid, record)
+            # Build tool IO for Langfuse — truncate large outputs so Langfuse stays readable.
+            tool_input = data.get("tool_input")
+            tool_output: Any = None
+            if isinstance(result_data, dict):
+                raw = result_data.get("output") or result_data.get("error")
+                tool_output = _truncate(raw)
+            elif result_data is not None:
+                tool_output = _truncate(str(result_data))
+            io_data: dict[str, Any] | None = None
+            if tool_input is not None or tool_output is not None:
+                io_data = {"input": tool_input, "output": tool_output}
+            await asyncio.to_thread(lf_writer.log_span, sid, record, io_data)
         return HookResult(action="continue")
 
     async def on_prompt_submit(event: str, data: dict[str, Any]) -> Any:
