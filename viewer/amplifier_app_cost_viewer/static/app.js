@@ -535,10 +535,10 @@ function _detailLlm(panel, span) {
 
   let cacheHtml = '';
   if (span.cache_read_tokens != null) {
-    cacheHtml += `<div class="detail-row"><span class="detail-label">cache_read</span> <span class="detail-value">${span.cache_read_tokens.toLocaleString()}</span></div>`;
+    cacheHtml += `<div class="detail-row"><span class="detail-label">cache_read</span> <span class="detail-value">${_esc(span.cache_read_tokens.toLocaleString())}</span></div>`;
   }
   if (span.cache_write_tokens != null) {
-    cacheHtml += `<div class="detail-row"><span class="detail-label">cache_write</span> <span class="detail-value">${span.cache_write_tokens.toLocaleString()}</span></div>`;
+    cacheHtml += `<div class="detail-row"><span class="detail-label">cache_write</span> <span class="detail-value">${_esc(span.cache_write_tokens.toLocaleString())}</span></div>`;
   }
 
   const costStr = span.cost_usd != null ? `$${span.cost_usd.toFixed(6)}` : 'n/a';
@@ -550,8 +550,8 @@ function _detailLlm(panel, span) {
     </div>
     <div class="detail-section">
       <div class="detail-row"><span class="detail-label">time</span> <span class="detail-value">${_esc(start)} \u2192 ${_esc(end)} (${_esc(duration)})</span></div>
-      <div class="detail-row"><span class="detail-label">in</span> <span class="detail-value">${span.input_tokens != null ? span.input_tokens.toLocaleString() : 'n/a'}</span></div>
-      <div class="detail-row"><span class="detail-label">out</span> <span class="detail-value">${span.output_tokens != null ? span.output_tokens.toLocaleString() : 'n/a'}</span></div>
+      <div class="detail-row"><span class="detail-label">in</span> <span class="detail-value">${span.input_tokens != null ? _esc(span.input_tokens.toLocaleString()) : 'n/a'}</span></div>
+      <div class="detail-row"><span class="detail-label">out</span> <span class="detail-value">${span.output_tokens != null ? _esc(span.output_tokens.toLocaleString()) : 'n/a'}</span></div>
       ${cacheHtml}
       <div class="detail-row"><span class="detail-label">cost</span> <span class="detail-value">${_esc(costStr)}</span></div>
     </div>
