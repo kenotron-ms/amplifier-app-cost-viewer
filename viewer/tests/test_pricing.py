@@ -47,14 +47,14 @@ class TestComputeCost:
         assert abs(cost - 0.30) < 0.001
 
     def test_cache_write_tokens(self):
-        """cache_write costs $0.75/MTok (25% of $3.00 input rate), 1M tokens = $0.75."""
+        """cache_write costs $3.75/MTok (125% of $3.00 input rate per LiteLLM), 1M tokens = $3.75."""
         cost = compute_cost(
             "claude-sonnet-4-5",
             input_tokens=0,
             output_tokens=0,
             cache_write_tokens=ONE_MILLION,
         )
-        assert abs(cost - 0.75) < 0.001
+        assert abs(cost - 3.75) < 0.001
 
     def test_gpt4o_cost(self):
         """gpt-4o: $2.50/MTok input, 1M input tokens = $2.50."""
@@ -72,7 +72,7 @@ class TestComputeCost:
         assert abs(cost - 0.10) < 0.001
 
     def test_all_token_types_sum(self):
-        """All 4 token types combined: input $3.00 + output $15.00 + cache_read $0.30 + cache_write $0.75 = $19.05."""
+        """All 4 token types combined: input $3.00 + output $15.00 + cache_read $0.30 + cache_write $3.75 = $22.05."""
         cost = compute_cost(
             "claude-sonnet-4-5",
             input_tokens=ONE_MILLION,
@@ -80,7 +80,7 @@ class TestComputeCost:
             cache_read_tokens=ONE_MILLION,
             cache_write_tokens=ONE_MILLION,
         )
-        assert abs(cost - 19.05) < 0.001
+        assert abs(cost - 22.05) < 0.001
 
 
 class TestPrefixMatch:
