@@ -299,3 +299,236 @@ class TestParseSpansOrder:
         spans = _get_spans(tmp_path)
         types = [s["type"] for s in spans]
         assert types == ["llm", "thinking", "tool"]
+
+
+# ---------------------------------------------------------------------------
+# Session tree building tests (task-10 TDD RED)
+# These tests import stub functions that raise NotImplementedError.
+# ---------------------------------------------------------------------------
+
+from amplifier_app_cost_viewer.reader import (  # noqa: E402
+    SessionNode,
+    aggregate_costs,
+    build_session_tree,
+    build_tree,
+    discover_sessions,
+)
+
+
+# ---------------------------------------------------------------------------
+# TestDiscoverSessions (7 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverSessions:
+    def test_finds_all_three_sessions(self, amp_home: Path):
+        """discover_sessions returns a dict with 3 entries."""
+        sessions = discover_sessions(amp_home)
+        assert len(sessions) == 3
+
+    def test_session_ids_are_correct(self, amp_home: Path):
+        """discover_sessions dict keys match all three session IDs."""
+        sessions = discover_sessions(amp_home)
+        expected = {"root-aabbccdd", "child1-11223344", "child2-55667788"}
+        assert set(sessions.keys()) == expected
+
+    def test_root_has_no_parent_id(self, amp_home: Path):
+        """Root session node has parent_id == None."""
+        sessions = discover_sessions(amp_home)
+        root = sessions["root-aabbccdd"]
+        assert root.parent_id is None
+
+    def test_children_have_correct_parent_id(self, amp_home: Path):
+        """Both child sessions point to the root session ID as parent_id."""
+        sessions = discover_sessions(amp_home)
+        assert sessions["child1-11223344"].parent_id == "root-aabbccdd"
+        assert sessions["child2-55667788"].parent_id == "root-aabbccdd"
+
+    def test_session_node_has_project_slug(self, amp_home: Path):
+        """Root session node carries the correct project_slug."""
+        sessions = discover_sessions(amp_home)
+        assert sessions["root-aabbccdd"].project_slug == "test-project"
+
+    def test_empty_projects_dir_returns_empty(self, tmp_path: Path):
+        """When projects/ dir exists but is empty, discover_sessions returns {}."""
+        empty_home = tmp_path / ".amplifier"
+        (empty_home / "projects").mkdir(parents=True)
+        sessions = discover_sessions(empty_home)
+        assert sessions == {}
+
+    def test_session_node_has_events_path(self, amp_home: Path):
+        """Root session node has a non-None events_path that exists on disk."""
+        sessions = discover_sessions(amp_home)
+        node = sessions["root-aabbccdd"]
+        assert node.events_path is not None
+        assert node.events_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# TestBuildTree (4 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildTree:
+    def test_returns_one_root(self, amp_home: Path):
+        """build_tree with 1 root + 2 children returns a list of length 1."""
+        sessions = discover_sessions(amp_home)
+        roots = build_tree(sessions)
+        assert len(roots) == 1
+
+    def test_root_has_two_children(self, amp_home: Path):
+        """The single root node has exactly 2 children after build_tree."""
+        sessions = discover_sessions(amp_home)
+        roots = build_tree(sessions)
+        assert len(roots[0].children) == 2
+
+    def test_root_session_id(self, amp_home: Path):
+        """The root node session_id matches 'root-aabbccdd'."""
+        sessions = discover_sessions(amp_home)
+        roots = build_tree(sessions)
+        assert roots[0].session_id == "root-aabbccdd"
+
+    def test_children_session_ids(self, amp_home: Path):
+        """Root children session_ids match the two child IDs."""
+        sessions = discover_sessions(amp_home)
+        roots = build_tree(sessions)
+        child_ids = {c.session_id for c in roots[0].children}
+        assert child_ids == {"child1-11223344", "child2-55667788"}
+
+
+# ---------------------------------------------------------------------------
+# TestAggregateCosts (2 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestAggregateCosts:
+    def test_root_total_includes_children(self):
+        """aggregate_costs sets root.total_cost_usd = own + sum of children."""
+        child1 = SessionNode(
+            session_id="c1",
+            project_slug="p",
+            parent_id="root",
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts=None,
+            duration_ms=0,
+            cost_usd=0.5,
+            total_cost_usd=0.5,
+            spans=[],
+            children=[],
+        )
+        child2 = SessionNode(
+            session_id="c2",
+            project_slug="p",
+            parent_id="root",
+            start_ts="2026-01-01T00:00:01+00:00",
+            end_ts=None,
+            duration_ms=0,
+            cost_usd=0.5,
+            total_cost_usd=0.5,
+            spans=[],
+            children=[],
+        )
+        root = SessionNode(
+            session_id="root",
+            project_slug="p",
+            parent_id=None,
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts=None,
+            duration_ms=0,
+            cost_usd=1.0,
+            total_cost_usd=1.0,
+            spans=[],
+            children=[child1, child2],
+        )
+        aggregate_costs(root)
+        assert root.total_cost_usd == 2.0
+
+    def test_leaf_total_equals_own_cost(self):
+        """aggregate_costs on a leaf sets total_cost_usd == cost_usd."""
+        leaf = SessionNode(
+            session_id="leaf",
+            project_slug="p",
+            parent_id=None,
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts=None,
+            duration_ms=0,
+            cost_usd=0.42,
+            total_cost_usd=0.0,
+            spans=[],
+            children=[],
+        )
+        aggregate_costs(leaf)
+        assert leaf.total_cost_usd == leaf.cost_usd
+
+
+# ---------------------------------------------------------------------------
+# TestBuildSessionTree (6 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildSessionTree:
+    def test_returns_list_of_roots(self, amp_home: Path):
+        """build_session_tree returns a list with exactly 1 root."""
+        result = build_session_tree(amp_home)
+        assert isinstance(result, list)
+        assert len(result) == 1
+
+    def test_root_has_children(self, amp_home: Path):
+        """Root node returned by build_session_tree has 2 children."""
+        roots = build_session_tree(amp_home)
+        assert len(roots[0].children) == 2
+
+    def test_root_spans_parsed(self, amp_home: Path):
+        """Root session node has exactly 1 LLM span after build_session_tree."""
+        roots = build_session_tree(amp_home)
+        root = roots[0]
+        llm_spans = [s for s in root.spans if s.type == "llm"]
+        assert len(llm_spans) == 1
+
+    def test_own_cost_nonzero(self, amp_home: Path):
+        """Root node cost_usd (own cost) is > 0 after parsing spans."""
+        roots = build_session_tree(amp_home)
+        assert roots[0].cost_usd > 0
+
+    def test_total_cost_aggregated(self, amp_home: Path):
+        """Root total_cost_usd == 3 sessions × $0.003456 = $0.010368."""
+        roots = build_session_tree(amp_home)
+        expected = 3 * 0.003456  # = 0.010368
+        assert abs(roots[0].total_cost_usd - expected) < 1e-6
+
+    def test_sorted_most_recent_first(self, amp_home: Path):
+        """build_session_tree returns roots sorted most-recent first."""
+        # Add an older root session (1 day before the fixture root)
+        OLD_ROOT_ID = "older-root-00112233"
+        OLD_ROOT_ISO = "2026-04-23T10:00:00.000+00:00"
+        session_dir = amp_home / "projects" / "test-project" / "sessions" / OLD_ROOT_ID
+        session_dir.mkdir(parents=True)
+        old_events = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "event": "session:start",
+                        "ts": OLD_ROOT_ISO,
+                        "data": {"session_id": OLD_ROOT_ID},
+                    }
+                ),
+                json.dumps({"event": "session:end", "ts": OLD_ROOT_ISO, "data": {}}),
+            ]
+        )
+        (session_dir / "events.jsonl").write_text(old_events)
+        (session_dir / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "session_id": OLD_ROOT_ID,
+                    "parent_id": None,
+                    "project_slug": "test-project",
+                    "created": OLD_ROOT_ISO,
+                }
+            )
+        )
+
+        roots = build_session_tree(amp_home)
+        # Two roots: fixture root (2026-04-24) and older root (2026-04-23)
+        assert len(roots) >= 2
+        # Most recent root should be first
+        assert roots[0].session_id == "root-aabbccdd"

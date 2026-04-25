@@ -291,17 +291,27 @@ def parse_spans(
 # ---------------------------------------------------------------------------
 
 
-def discover_sessions() -> None:
+def discover_sessions(amp_home: Path) -> dict[str, "SessionNode"]:
+    """Discover all sessions under amp_home/projects/*/sessions/.
+
+    Returns a flat dict mapping session_id → SessionNode.
+    """
     raise NotImplementedError
 
 
-def build_tree() -> None:
+def build_tree(sessions: dict[str, "SessionNode"]) -> list["SessionNode"]:
+    """Arrange flat sessions dict into a forest (list of root SessionNodes)."""
     raise NotImplementedError
 
 
-def aggregate_costs() -> None:
+def aggregate_costs(node: "SessionNode") -> None:
+    """Recursively set total_cost_usd = cost_usd + sum of children totals."""
     raise NotImplementedError
 
 
-def build_session_tree() -> None:
+def build_session_tree(amp_home: Path) -> list["SessionNode"]:
+    """Discover sessions, build tree, parse spans, aggregate costs.
+
+    Returns root SessionNodes sorted most-recent first.
+    """
     raise NotImplementedError
