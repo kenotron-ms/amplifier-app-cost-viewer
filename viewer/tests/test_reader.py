@@ -14,6 +14,7 @@ from pathlib import Path
 from amplifier_app_cost_viewer.reader import (
     THINKING_COLOR,
     TOOL_COLOR,
+    Span,
     normalize_timestamps,
     parse_spans,
 )
@@ -154,7 +155,7 @@ def _write_events(tmp_path: Path, content: str) -> Path:
     return p
 
 
-def _get_spans(tmp_path: Path, content: str = SYNTHETIC_EVENTS) -> list[dict]:
+def _get_spans(tmp_path: Path, content: str = SYNTHETIC_EVENTS) -> list[Span]:
     p = _write_events(tmp_path, content)
     session_start_ms = normalize_timestamps(p)
     return parse_spans(p, session_start_ms)

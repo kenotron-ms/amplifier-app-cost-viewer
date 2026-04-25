@@ -174,6 +174,11 @@ def parse_spans(
     provider_requests = [e for e in events if e.get("event") == "provider:request"]
     llm_responses = [e for e in events if e.get("event") == "llm:response"]
 
+    # Pairing assumes strict request→response interleaving (sequential zip).
+    # If counts diverge, the shorter list wins — unmatched events are silently
+    # dropped.  This holds for the current Amplifier event schema; if the schema
+    # adds a correlation ID to provider:request + llm:response in the future,
+    # switch to ID-matched pairing for robustness.
     for req, resp in zip(provider_requests, llm_responses):
         req_data = req.get("data", {})
         resp_data = resp.get("data", {})
@@ -181,10 +186,14 @@ def parse_spans(
 
         provider = req_data.get("provider")
         model = resp_data.get("model", "")
-        input_tokens = usage.get("input_tokens", 0)
-        output_tokens = usage.get("output_tokens", 0)
-        cache_read_tokens = usage.get("cache_read_tokens", 0)
-        cache_write_tokens = usage.get("cache_write_tokens", 0)
+        # Support both long-form keys (input_tokens) and short-form keys (input)
+        # — production Amplifier events use both formats.
+        input_tokens = usage.get("input_tokens", usage.get("input", 0))
+        output_tokens = usage.get("output_tokens", usage.get("output", 0))
+        cache_read_tokens = usage.get("cache_read_tokens", usage.get("cache_read", 0))
+        cache_write_tokens = usage.get(
+            "cache_write_tokens", usage.get("cache_write", 0)
+        )
 
         cost = compute_cost(
             model,
