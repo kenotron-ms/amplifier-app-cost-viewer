@@ -26,7 +26,9 @@ class TestComputeCost:
 
     def test_unknown_model_returns_zero(self):
         """A completely unrecognised model name returns 0.0."""
-        cost = compute_cost("completely-unknown-model-xyz-9999", ONE_MILLION, ONE_MILLION)
+        cost = compute_cost(
+            "completely-unknown-model-xyz-9999", ONE_MILLION, ONE_MILLION
+        )
         assert abs(cost - 0.0) < 0.001
 
     def test_zero_tokens_returns_zero(self):
