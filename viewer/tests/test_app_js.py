@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Path
 # ---------------------------------------------------------------------------
@@ -15,6 +17,17 @@ from pathlib import Path
 APP_JS = (
     Path(__file__).parent.parent / "amplifier_app_cost_viewer" / "static" / "app.js"
 )
+
+
+# ---------------------------------------------------------------------------
+# Fixture: raw file content (for module-level function tests)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def app_js_code() -> str:
+    """Return the full text of app.js for content-based assertions."""
+    return APP_JS.read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -89,15 +102,18 @@ class TestSection2ApiCalls:
         self.content = APP_JS.read_text()
 
     def test_fetch_sessions_function_defined(self) -> None:
-        assert "async function fetchSessions()" in self.content, (
-            "Must define 'async function fetchSessions()'"
-        )
+        # Accepts either no-arg or paginated offset parameter signature
+        assert (
+            "async function fetchSessions(offset" in self.content
+            or "async function fetchSessions()" in self.content
+        ), "Must define 'async function fetchSessions' (with optional offset param)"
 
     def test_fetch_sessions_calls_api(self) -> None:
         assert (
             "'/api/sessions'" in self.content
             or '"/api/sessions"' in self.content
-            or "'/api/sessions'" in self.content
+            or "/api/sessions?limit=" in self.content
+            or "`/api/sessions?" in self.content
         ), "fetchSessions must call GET /api/sessions"
 
     def test_fetch_sessions_stores_to_state(self) -> None:
@@ -1212,3 +1228,22 @@ class TestSection6DetailPanel:
         assert "_formatMs" in after_s6, (
             "Detail panel functions must use _formatMs for formatted offsets"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Pagination — load-more sentinel (Task 11 / pagination spec)
+# ---------------------------------------------------------------------------
+
+
+def test_load_more_sentinel_present_when_has_more(app_js_code: str) -> None:
+    """__load_more__ sentinel option is added when has_more is true."""
+    assert "__load_more__" in app_js_code
+
+
+def test_fetch_sessions_appends_on_offset(app_js_code: str) -> None:
+    """fetchSessions with offset > 0 appends to state.sessions."""
+    assert (
+        "state.sessions = [...state.sessions" in app_js_code
+        or "sessions.push" in app_js_code
+        or "concat" in app_js_code
+    )

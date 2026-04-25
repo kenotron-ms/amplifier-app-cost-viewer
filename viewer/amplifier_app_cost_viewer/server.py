@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -140,20 +140,25 @@ def _find_root(session_id: str) -> SessionNode | None:
 
 
 @app.get("/api/sessions")
-def list_sessions() -> list[dict]:
-    """Return true root sessions (parent_id is None) as a summary list (no spans).
+def list_sessions(
+    limit: int = Query(default=25, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
+    """Return paginated root sessions (parent_id is None) sorted by recency.
 
-    Only sessions with no parent are shown.  Sessions whose parent_id is set
-    but whose parent does not exist on disk are intentionally excluded — these
-    are Amplifier child sessions (e.g. delegated sub-agents) whose root context
-    is not stored locally and would show as empty/misleading entries.
+    Only sessions with no parent are shown — child/delegate sessions are
+    intentionally excluded.
     """
     roots = _get_roots()
-    return [
-        _node_to_dict(root, include_spans=False)
-        for root in roots
-        if root.parent_id is None
-    ]
+    true_roots = [r for r in roots if r.parent_id is None]
+    total = len(true_roots)
+    page = true_roots[offset : offset + limit]
+    return {
+        "sessions": [_node_to_dict(r, include_spans=False) for r in page],
+        "total": total,
+        "has_more": (offset + limit) < total,
+        "next_offset": offset + limit,
+    }
 
 
 @app.get("/api/sessions/{session_id}")

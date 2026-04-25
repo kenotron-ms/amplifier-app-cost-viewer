@@ -322,15 +322,20 @@ from amplifier_app_cost_viewer.reader import (  # noqa: E402
 
 
 class TestDiscoverSessions:
-    def test_finds_all_three_sessions(self, amp_home: Path):
-        """discover_sessions returns a dict with 3 entries."""
+    def test_finds_all_four_sessions(self, amp_home: Path):
+        """discover_sessions returns a dict with 4 entries (2 roots + 2 children)."""
         sessions = discover_sessions(amp_home)
-        assert len(sessions) == 3
+        assert len(sessions) == 4
 
     def test_session_ids_are_correct(self, amp_home: Path):
-        """discover_sessions dict keys match all three session IDs."""
+        """discover_sessions dict keys match all four session IDs."""
         sessions = discover_sessions(amp_home)
-        expected = {"root-aabbccdd", "child1-11223344", "child2-55667788"}
+        expected = {
+            "root-aabbccdd",
+            "root2-eeffgghh",
+            "child1-11223344",
+            "child2-55667788",
+        }
         assert set(sessions.keys()) == expected
 
     def test_root_has_no_parent_id(self, amp_home: Path):
@@ -371,29 +376,33 @@ class TestDiscoverSessions:
 
 
 class TestBuildTree:
-    def test_returns_one_root(self, amp_home: Path):
-        """build_tree with 1 root + 2 children returns a list of length 1."""
+    def test_returns_two_roots(self, amp_home: Path):
+        """build_tree with 2 roots + 2 children returns a list of length 2."""
         sessions = discover_sessions(amp_home)
         roots = build_tree(sessions)
-        assert len(roots) == 1
+        assert len(roots) == 2
 
     def test_root_has_two_children(self, amp_home: Path):
-        """The single root node has exactly 2 children after build_tree."""
+        """root-aabbccdd node has exactly 2 children after build_tree."""
         sessions = discover_sessions(amp_home)
         roots = build_tree(sessions)
-        assert len(roots[0].children) == 2
+        root_with_children = next(r for r in roots if len(r.children) == 2)
+        assert len(root_with_children.children) == 2
 
-    def test_root_session_id(self, amp_home: Path):
-        """The root node session_id matches 'root-aabbccdd'."""
+    def test_root_session_ids_present(self, amp_home: Path):
+        """Both root session IDs ('root-aabbccdd' and 'root2-eeffgghh') appear in roots."""
         sessions = discover_sessions(amp_home)
         roots = build_tree(sessions)
-        assert roots[0].session_id == "root-aabbccdd"
+        root_ids = {r.session_id for r in roots}
+        assert "root-aabbccdd" in root_ids
+        assert "root2-eeffgghh" in root_ids
 
     def test_children_session_ids(self, amp_home: Path):
-        """Root children session_ids match the two child IDs."""
+        """root-aabbccdd children session_ids match the two child IDs."""
         sessions = discover_sessions(amp_home)
         roots = build_tree(sessions)
-        child_ids = {c.session_id for c in roots[0].children}
+        root_with_children = next(r for r in roots if r.session_id == "root-aabbccdd")
+        child_ids = {c.session_id for c in root_with_children.children}
         assert child_ids == {"child1-11223344", "child2-55667788"}
 
 
@@ -469,33 +478,38 @@ class TestAggregateCosts:
 
 class TestBuildSessionTree:
     def test_returns_list_of_roots(self, amp_home: Path):
-        """build_session_tree returns a list with exactly 1 root."""
+        """build_session_tree returns a list with exactly 2 roots (root + root2)."""
         result = build_session_tree(amp_home)
         assert isinstance(result, list)
-        assert len(result) == 1
+        assert len(result) == 2
 
     def test_root_has_children(self, amp_home: Path):
-        """Root node returned by build_session_tree has 2 children."""
+        """root-aabbccdd node returned by build_session_tree has 2 children."""
         roots = build_session_tree(amp_home)
-        assert len(roots[0].children) == 2
+        # root-aabbccdd (older) has 2 children; root2-eeffgghh (newer) has 0
+        root_with_children = next(r for r in roots if len(r.children) == 2)
+        assert len(root_with_children.children) == 2
 
     def test_root_spans_parsed(self, amp_home: Path):
-        """Root session node has exactly 1 LLM span after build_session_tree."""
+        """Each root session node has exactly 1 LLM span after build_session_tree."""
         roots = build_session_tree(amp_home)
-        root = roots[0]
-        llm_spans = [s for s in root.spans if s.type == "llm"]
-        assert len(llm_spans) == 1
+        for root in roots:
+            llm_spans = [s for s in root.spans if s.type == "llm"]
+            assert len(llm_spans) == 1, f"{root.session_id} should have 1 LLM span"
 
     def test_own_cost_nonzero(self, amp_home: Path):
-        """Root node cost_usd (own cost) is > 0 after parsing spans."""
+        """Each root node cost_usd (own cost) is > 0 after parsing spans."""
         roots = build_session_tree(amp_home)
-        assert roots[0].cost_usd > 0
+        for root in roots:
+            assert root.cost_usd > 0, f"{root.session_id} should have non-zero cost"
 
     def test_total_cost_aggregated(self, amp_home: Path):
-        """Root total_cost_usd == 3 sessions × $0.003456 = $0.010368."""
+        """root-aabbccdd total_cost_usd == 3 sessions × $0.003456 = $0.010368."""
         roots = build_session_tree(amp_home)
+        # Find the root with children (root-aabbccdd has 2 children, root2 has none)
+        root_with_children = next(r for r in roots if len(r.children) == 2)
         expected = 3 * 0.003456  # = 0.010368
-        assert abs(roots[0].total_cost_usd - expected) < 1e-6
+        assert abs(root_with_children.total_cost_usd - expected) < 1e-6
 
     def test_sorted_most_recent_first(self, amp_home: Path):
         """build_session_tree returns roots sorted most-recent first."""
@@ -529,10 +543,12 @@ class TestBuildSessionTree:
         )
 
         roots = build_session_tree(amp_home)
-        # Two roots: fixture root (2026-04-24) and older root (2026-04-23)
-        assert len(roots) >= 2
-        # Most recent root should be first
-        assert roots[0].session_id == "root-aabbccdd"
+        # Three roots now: root2 (2026-04-24T11:00), root1 (2026-04-24T10:00), older (2026-04-23)
+        assert len(roots) >= 3
+        # Most recent root (root2-eeffgghh at 11:00) should be first
+        assert roots[0].session_id == "root2-eeffgghh"
+        # Oldest root must be last
+        assert roots[-1].session_id == OLD_ROOT_ID
 
 
 # ---------------------------------------------------------------------------

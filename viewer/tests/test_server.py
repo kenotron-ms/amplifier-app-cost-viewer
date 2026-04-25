@@ -57,26 +57,32 @@ class TestListSessions:
         response = client.get("/api/sessions")
         assert response.status_code == 200
 
-    def test_returns_list(self, client: TestClient) -> None:
-        """Response body is a JSON array."""
-        response = client.get("/api/sessions")
-        assert isinstance(response.json(), list)
+    def test_returns_pagination_envelope(self, client: TestClient) -> None:
+        """Response body is a pagination envelope dict, not a bare list."""
+        data = client.get("/api/sessions").json()
+        assert isinstance(data, dict)
+        assert "sessions" in data
+        assert "total" in data
+        assert "has_more" in data
+        assert "next_offset" in data
 
-    def test_returns_one_root(self, client: TestClient) -> None:
-        """Fixture has exactly 1 root session; list length is 1."""
-        response = client.get("/api/sessions")
-        assert len(response.json()) == 1
+    def test_returns_two_roots(self, client: TestClient) -> None:
+        """Fixture has exactly 2 root sessions; total == 2."""
+        data = client.get("/api/sessions").json()
+        assert data["total"] == 2
 
     def test_root_session_id_present(self, client: TestClient) -> None:
-        """Root session ID 'root-aabbccdd' appears in the first list entry."""
-        response = client.get("/api/sessions")
-        entry = response.json()[0]
-        assert entry["session_id"] == ROOT_SESSION_ID
+        """Root session ID 'root-aabbccdd' appears somewhere in the sessions list."""
+        data = client.get("/api/sessions").json()
+        ids = [s["session_id"] for s in data["sessions"]]
+        assert ROOT_SESSION_ID in ids
 
     def test_entry_has_required_fields(self, client: TestClient) -> None:
-        """Each list entry contains all required summary fields."""
-        response = client.get("/api/sessions")
-        entry = response.json()[0]
+        """Each session entry contains all required summary fields."""
+        data = client.get("/api/sessions").json()
+        # Use ROOT_SESSION_ID entry which has known children
+        sessions = {s["session_id"]: s for s in data["sessions"]}
+        entry = sessions[ROOT_SESSION_ID]
         required = {
             "session_id",
             "project_slug",
@@ -90,14 +96,15 @@ class TestListSessions:
 
     def test_child_count_is_two(self, client: TestClient) -> None:
         """Root session has child_count == 2 (child1 + child2)."""
-        response = client.get("/api/sessions")
-        entry = response.json()[0]
-        assert entry["child_count"] == 2
+        data = client.get("/api/sessions").json()
+        sessions = {s["session_id"]: s for s in data["sessions"]}
+        assert sessions[ROOT_SESSION_ID]["child_count"] == 2
 
     def test_total_cost_greater_than_own_cost(self, client: TestClient) -> None:
         """total_cost_usd includes children costs so it exceeds the root's own cost_usd."""
-        response = client.get("/api/sessions")
-        entry = response.json()[0]
+        data = client.get("/api/sessions").json()
+        sessions = {s["session_id"]: s for s in data["sessions"]}
+        entry = sessions[ROOT_SESSION_ID]
         assert entry["total_cost_usd"] > entry["cost_usd"]
 
 
@@ -298,7 +305,8 @@ class TestSessionFilter:
             with TestClient(app, raise_server_exceptions=True) as c:
                 response = c.get("/api/sessions")
             assert response.status_code == 200
-            sessions = response.json()
+            data = response.json()
+            sessions = data["sessions"]
             assert sessions == [], (
                 "Orphaned session (parent_id set, parent not on disk) must not "
                 f"appear in /api/sessions; got {sessions}"
@@ -310,8 +318,8 @@ class TestSessionFilter:
         """A session with parent_id=None (true root) must appear in /api/sessions."""
         response = client.get("/api/sessions")
         assert response.status_code == 200
-        sessions = response.json()
-        ids = [s["session_id"] for s in sessions]
+        data = response.json()
+        ids = [s["session_id"] for s in data["sessions"]]
         assert ROOT_SESSION_ID in ids, (
             f"True root session {ROOT_SESSION_ID!r} must appear in list; got {ids}"
         )
@@ -326,6 +334,51 @@ def test_session_name_in_list(client: TestClient, amp_home: Path) -> None:
     """GET /api/sessions includes name field (may be None) in each entry."""
     resp = client.get("/api/sessions")
     assert resp.status_code == 200
-    sessions = resp.json()
-    for s in sessions:
+    data = resp.json()
+    for s in data["sessions"]:
         assert "name" in s, f"'name' key must be present in session summary, got {s}"
+
+
+# ---------------------------------------------------------------------------
+# TestListSessionsPagination — pagination envelope (3 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestListSessionsPagination:
+    def test_list_sessions_default_limit(
+        self, client: TestClient, amp_home: Path
+    ) -> None:
+        """GET /api/sessions returns envelope with pagination fields."""
+        resp = client.get("/api/sessions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "sessions" in data
+        assert "total" in data
+        assert "has_more" in data
+        assert "next_offset" in data
+
+    def test_list_sessions_pagination(self, client: TestClient, amp_home: Path) -> None:
+        """offset and limit params control which sessions are returned.
+
+        amp_home fixture has 2 root sessions — verify offset slices correctly.
+        """
+        resp_p1 = client.get("/api/sessions?limit=1&offset=0")
+        resp_p2 = client.get("/api/sessions?limit=1&offset=1")
+        assert resp_p1.status_code == 200
+        assert resp_p2.status_code == 200
+        p1 = resp_p1.json()
+        p2 = resp_p2.json()
+        # Different sessions on each page
+        assert p1["sessions"][0]["session_id"] != p2["sessions"][0]["session_id"]
+        # has_more correct
+        assert p1["has_more"] is True  # 2 total, 1 per page
+        assert p2["has_more"] is False
+
+    def test_list_sessions_total_consistent(
+        self, client: TestClient, amp_home: Path
+    ) -> None:
+        """total field reflects the full count, not the page size."""
+        resp = client.get("/api/sessions?limit=1&offset=0")
+        data = resp.json()
+        assert data["total"] >= 1
+        assert len(data["sessions"]) == 1

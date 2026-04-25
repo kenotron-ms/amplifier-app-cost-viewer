@@ -18,7 +18,9 @@
 // ================================================================
 
 const state = {
-  sessions: [],           // list of root-session summaries from GET /api/sessions
+  sessions: [],           // accumulated root-session summaries (grows with load more)
+  sessionsOffset: 0,      // next offset to fetch (for load-more pagination)
+  sessionsHasMore: false, // true when more sessions are available server-side
   activeSessionId: null,  // session ID currently shown in tree + Gantt
   sessionData: null,      // full session tree from GET /api/sessions/{id}
   spans: [],              // flattened spans from GET /api/sessions/{id}/spans
@@ -36,10 +38,17 @@ const expandedNodes = new Set();
 // All communication with the FastAPI backend lives here.
 // ================================================================
 
-async function fetchSessions() {
-  const resp = await fetch('/api/sessions');
+async function fetchSessions(offset = 0) {
+  const resp = await fetch(`/api/sessions?limit=25&offset=${offset}`);
   if (!resp.ok) throw new Error(`GET /api/sessions → ${resp.status}`);
-  state.sessions = await resp.json();
+  const data = await resp.json();
+  if (offset === 0) {
+    state.sessions = data.sessions;
+  } else {
+    state.sessions = [...state.sessions, ...data.sessions];
+  }
+  state.sessionsOffset = data.next_offset;
+  state.sessionsHasMore = data.has_more;
 }
 
 async function fetchSession(id) {
@@ -86,8 +95,29 @@ function renderToolbar() {
     <button id="refresh-btn" title="Refresh session list">&#8635;</button>
   `;
 
-  document.getElementById('session-select').addEventListener('change', e => {
-    loadSession(e.target.value).catch(err => {
+  // Append "Load more" sentinel option if the server has more sessions
+  const select = document.getElementById('session-select');
+  if (state.sessionsHasMore) {
+    const totalKnown = state.total || state.sessions.length;
+    const loadMore = document.createElement('option');
+    loadMore.value = '__load_more__';
+    loadMore.textContent = `\u2014 Load 25 more (${state.sessions.length} of ${totalKnown}) \u2014`;
+    loadMore.disabled = false;
+    select.appendChild(loadMore);
+  }
+
+  select.addEventListener('change', e => {
+    const id = e.target.value;
+    if (id === '__load_more__') {
+      fetchSessions(state.sessionsOffset).then(() => {
+        renderToolbar();
+      }).catch(err => {
+        console.error('Failed to load more sessions:', err);
+        _showError(`Error: ${err.message}`);
+      });
+      return;
+    }
+    loadSession(id).catch(err => {
       console.error('Failed to switch session:', err);
       _showError(`Error: ${err.message}`);
     });

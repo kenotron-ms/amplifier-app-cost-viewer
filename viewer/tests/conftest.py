@@ -13,10 +13,12 @@ import pytest
 # ---------------------------------------------------------------------------
 
 ROOT_SESSION_ID = "root-aabbccdd"
+ROOT2_SESSION_ID = "root2-eeffgghh"
 CHILD1_SESSION_ID = "child1-11223344"
 CHILD2_SESSION_ID = "child2-55667788"
 PROJECT_SLUG = "test-project"
 ROOT_START_ISO = "2026-04-24T10:00:00.000+00:00"
+ROOT2_START_ISO = "2026-04-24T11:00:00.000+00:00"
 CHILD1_START_ISO = "2026-04-24T10:00:05.000+00:00"
 CHILD2_START_ISO = "2026-04-24T10:00:15.000+00:00"
 COST_PER_SESSION = 0.003456  # 512 * 3e-6 + 128 * 15e-6
@@ -107,20 +109,23 @@ def _session_metadata(
 
 @pytest.fixture
 def amp_home(tmp_path: Path) -> Path:
-    """Create a fake ~/.amplifier with 3 sessions (1 root + 2 children).
+    """Create a fake ~/.amplifier with 4 sessions (2 roots + 2 children of root1).
 
     Layout:
         <tmp_path>/.amplifier/
             projects/
                 test-project/
                     sessions/
-                        root-aabbccdd/
+                        root-aabbccdd/      ← root1 (older, has 2 children)
                             events.jsonl
                             metadata.json
                         child1-11223344/
                             events.jsonl
                             metadata.json
                         child2-55667788/
+                            events.jsonl
+                            metadata.json
+                        root2-eeffgghh/     ← root2 (newer, no children)
                             events.jsonl
                             metadata.json
     """
@@ -132,6 +137,7 @@ def amp_home(tmp_path: Path) -> Path:
         (ROOT_SESSION_ID, ROOT_START_ISO, None),
         (CHILD1_SESSION_ID, CHILD1_START_ISO, ROOT_SESSION_ID),
         (CHILD2_SESSION_ID, CHILD2_START_ISO, ROOT_SESSION_ID),
+        (ROOT2_SESSION_ID, ROOT2_START_ISO, None),
     ]
 
     for session_id, start_iso, parent_id in session_specs:
