@@ -484,11 +484,180 @@ function _showGap(clickMs) {
 // Section 6: Detail panel  (added in Task 10)
 // ================================================================
 
-function renderDetail() { /* stub — replaced in Task 10 */ }
+const IO_TRUNCATE = 500;
+
 
 function selectSpan(span) {
   state.selectedSpan = span;
   renderDetail(span);
+}
+
+
+function renderDetail(span) {
+  const panel = document.getElementById('detail-panel');
+  panel.classList.remove('hidden');
+  panel.innerHTML = '';
+
+  if (!span) return;
+
+  const type = span.type || '';
+  if (type === 'llm') {
+    _detailLlm(panel, span);
+  } else if (type === 'tool') {
+    _detailTool(panel, span);
+  } else if (type === 'thinking') {
+    _detailThinking(panel, span);
+  } else if (type === 'gap') {
+    _detailGap(panel, span);
+  }
+
+  // Wire .detail-show-more buttons: click replaces content with data-fullText, removes button
+  panel.querySelectorAll('.detail-show-more').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const content = btn.previousElementSibling;
+      if (content) content.textContent = btn.dataset.fullText;
+      btn.remove();
+    });
+  });
+
+  // Wire .detail-close button to _closeDetail
+  const closeBtn = panel.querySelector('.detail-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', _closeDetail);
+  }
+}
+
+
+function _detailLlm(panel, span) {
+  const start = _formatMs(span.start_ms || 0);
+  const end = _formatMs(span.end_ms || 0);
+  const duration = _formatMs((span.end_ms || 0) - (span.start_ms || 0));
+
+  let cacheHtml = '';
+  if (span.cache_read_tokens != null) {
+    cacheHtml += `<div class="detail-row"><span class="detail-label">cache_read</span> <span class="detail-value">${span.cache_read_tokens.toLocaleString()}</span></div>`;
+  }
+  if (span.cache_write_tokens != null) {
+    cacheHtml += `<div class="detail-row"><span class="detail-label">cache_write</span> <span class="detail-value">${span.cache_write_tokens.toLocaleString()}</span></div>`;
+  }
+
+  const costStr = span.cost_usd != null ? `$${span.cost_usd.toFixed(6)}` : 'n/a';
+
+  panel.innerHTML = `
+    <div class="detail-header">
+      <span class="detail-title">${_esc(span.provider || '')}/${_esc(span.model || '')}</span>
+      <button class="detail-close">\u2715</button>
+    </div>
+    <div class="detail-section">
+      <div class="detail-row"><span class="detail-label">time</span> <span class="detail-value">${_esc(start)} \u2192 ${_esc(end)} (${_esc(duration)})</span></div>
+      <div class="detail-row"><span class="detail-label">in</span> <span class="detail-value">${span.input_tokens != null ? span.input_tokens.toLocaleString() : 'n/a'}</span></div>
+      <div class="detail-row"><span class="detail-label">out</span> <span class="detail-value">${span.output_tokens != null ? span.output_tokens.toLocaleString() : 'n/a'}</span></div>
+      ${cacheHtml}
+      <div class="detail-row"><span class="detail-label">cost</span> <span class="detail-value">${_esc(costStr)}</span></div>
+    </div>
+    ${_ioBlock('INPUT', span.input_text)}
+    ${_ioBlock('OUTPUT', span.output_text)}
+  `;
+}
+
+
+function _detailTool(panel, span) {
+  const start = _formatMs(span.start_ms || 0);
+  const end = _formatMs(span.end_ms || 0);
+  const duration = _formatMs((span.end_ms || 0) - (span.start_ms || 0));
+  const ok = span.success ? '\u2713' : '\u2717';
+  const okColor = span.success ? 'green' : 'red';
+  const toolName = span.tool_name || span.name || '';
+
+  panel.innerHTML = `
+    <div class="detail-header">
+      <span class="detail-title">${_esc(toolName)} <span style="color:${okColor}">${ok}</span></span>
+      <button class="detail-close">\u2715</button>
+    </div>
+    <div class="detail-section">
+      <div class="detail-row"><span class="detail-label">time</span> <span class="detail-value">${_esc(start)} \u2192 ${_esc(end)} (${_esc(duration)})</span></div>
+    </div>
+    ${_ioBlock('INPUT', span.input)}
+    ${_ioBlock('OUTPUT', span.output)}
+  `;
+}
+
+
+function _detailThinking(panel, span) {
+  const start = _formatMs(span.start_ms || 0);
+  const end = _formatMs(span.end_ms || 0);
+  const duration = _formatMs((span.end_ms || 0) - (span.start_ms || 0));
+
+  panel.innerHTML = `
+    <div class="detail-header">
+      <span class="detail-title" style="color:#6366F1">thinking</span>
+      <button class="detail-close">\u2715</button>
+    </div>
+    <div class="detail-section">
+      <div class="detail-row"><span class="detail-label">time</span> <span class="detail-value">${_esc(start)} \u2192 ${_esc(end)} (${_esc(duration)})</span></div>
+    </div>
+  `;
+}
+
+
+function _detailGap(panel, span) {
+  const before = span.before;
+  const after = span.after;
+
+  const beforeMs = before ? (before.end_ms || 0) : 0;
+  const afterMs = after ? (after.start_ms || 0) : (span.clickMs || 0);
+  const gapDuration = _formatMs(Math.max(0, afterMs - beforeMs));
+
+  const beforeLabel = before
+    ? (_formatMs(before.start_ms || 0) + '\u2013' + _formatMs(before.end_ms || 0))
+    : 'start';
+  const afterLabel = after
+    ? (_formatMs(after.start_ms || 0) + '\u2013' + _formatMs(after.end_ms || 0))
+    : 'end';
+
+  panel.innerHTML = `
+    <div class="detail-header">
+      <span class="detail-title" style="color:#8b949e">orchestrator overhead</span>
+      <button class="detail-close">\u2715</button>
+    </div>
+    <div class="detail-section">
+      <div class="detail-row"><span class="detail-label">duration</span> <span class="detail-value">${_esc(gapDuration)}</span></div>
+      <div class="detail-row"><span class="detail-label">between</span> <span class="detail-value">${_esc(beforeLabel)} and ${_esc(afterLabel)}</span></div>
+    </div>
+  `;
+}
+
+
+function _ioBlock(label, value) {
+  if (value == null) return '';
+  const str = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  const truncated = str.length > IO_TRUNCATE;
+  const display = truncated ? str.slice(0, IO_TRUNCATE) + '\u2026' : str;
+  const showMore = truncated
+    ? `<button class="detail-show-more" data-full-text="${_esc(str)}">show more (${str.length} chars)</button>`
+    : '';
+  return `
+    <div class="detail-io-block">
+      <div class="detail-io-label">${_esc(label)}</div>
+      <div class="detail-io-content" data-full-text="${_esc(str)}">${_esc(display)}</div>
+      ${showMore}
+    </div>
+  `;
+}
+
+
+function _closeDetail() {
+  document.getElementById('detail-panel').classList.add('hidden');
+  state.selectedSpan = null;
+}
+
+
+function _esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 

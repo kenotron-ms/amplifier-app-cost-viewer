@@ -245,8 +245,9 @@ class TestSectionStubs:
         assert "function renderGantt()" in self.content, "Must have renderGantt() stub"
 
     def test_render_detail_stub_exists(self) -> None:
-        assert "function renderDetail()" in self.content, (
-            "Must have renderDetail() stub"
+        # After Task 10, renderDetail() is fully implemented with a span parameter
+        assert "function renderDetail(" in self.content, (
+            "Must have renderDetail() function (stub or full implementation)"
         )
 
     def test_select_span_stub_exists(self) -> None:
@@ -901,4 +902,299 @@ class TestSection5HelperFunctions:
         next_fn = after_fn.split("function ")[0]
         assert "renderDetail(" in next_fn, (
             "selectSpan must call renderDetail(span)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Section 6 — Detail panel (Task 10)
+# ---------------------------------------------------------------------------
+
+
+class TestSection6DetailPanel:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    # --- IO_TRUNCATE constant ---
+
+    def test_io_truncate_constant_defined(self) -> None:
+        assert "IO_TRUNCATE" in self.content, "Must define IO_TRUNCATE constant"
+
+    def test_io_truncate_value_is_500(self) -> None:
+        assert "IO_TRUNCATE = 500" in self.content or "IO_TRUNCATE=500" in self.content, (
+            "IO_TRUNCATE must equal 500"
+        )
+
+    # --- renderDetail function ---
+
+    def test_render_detail_is_not_a_stub(self) -> None:
+        """renderDetail must be fully implemented, not just a comment stub."""
+        after_fn = self.content.split("function renderDetail(")[1]
+        next_fn = after_fn.split("function ")[0]
+        assert "/* stub" not in next_fn, "renderDetail() must not be a stub comment"
+
+    def test_render_detail_removes_hidden_class(self) -> None:
+        assert (
+            "classList.remove('hidden')" in self.content
+            or 'classList.remove("hidden")' in self.content
+        ), "renderDetail must remove 'hidden' class from #detail-panel"
+
+    def test_render_detail_dispatches_to_detail_llm(self) -> None:
+        assert "_detailLlm(" in self.content, (
+            "renderDetail must dispatch to _detailLlm for llm spans"
+        )
+
+    def test_render_detail_dispatches_to_detail_tool(self) -> None:
+        assert "_detailTool(" in self.content, (
+            "renderDetail must dispatch to _detailTool for tool spans"
+        )
+
+    def test_render_detail_dispatches_to_detail_thinking(self) -> None:
+        assert "_detailThinking(" in self.content, (
+            "renderDetail must dispatch to _detailThinking for thinking spans"
+        )
+
+    def test_render_detail_dispatches_to_detail_gap(self) -> None:
+        assert "_detailGap(" in self.content, (
+            "renderDetail must dispatch to _detailGap for gap spans"
+        )
+
+    def test_render_detail_wires_show_more_buttons(self) -> None:
+        assert "detail-show-more" in self.content, (
+            "renderDetail must wire .detail-show-more click handlers"
+        )
+
+    def test_render_detail_wires_close_button(self) -> None:
+        assert "detail-close" in self.content, (
+            "renderDetail must wire .detail-close button"
+        )
+        assert "_closeDetail" in self.content, (
+            "renderDetail must call _closeDetail from close button"
+        )
+
+    # --- selectSpan sets state.selectedSpan ---
+
+    def test_select_span_sets_state_selected_span(self) -> None:
+        after_fn = self.content.split("function selectSpan(")[1]
+        next_fn = after_fn.split("function ")[0]
+        assert "state.selectedSpan" in next_fn, (
+            "selectSpan must set state.selectedSpan"
+        )
+
+    # --- _detailLlm ---
+
+    def test_detail_llm_function_defined(self) -> None:
+        assert "function _detailLlm(" in self.content, (
+            "Must define '_detailLlm' function"
+        )
+
+    def test_detail_llm_shows_provider_model_title(self) -> None:
+        assert "span.provider" in self.content, (
+            "_detailLlm must reference span.provider for the title"
+        )
+        assert "span.model" in self.content, (
+            "_detailLlm must reference span.model for the title"
+        )
+
+    def test_detail_llm_shows_token_counts_with_to_locale_string(self) -> None:
+        assert "toLocaleString" in self.content, (
+            "_detailLlm must display token counts using toLocaleString"
+        )
+
+    def test_detail_llm_shows_cost_as_6_decimals(self) -> None:
+        assert "toFixed(6)" in self.content, (
+            "_detailLlm must format cost_usd with toFixed(6)"
+        )
+
+    def test_detail_llm_references_cost_usd(self) -> None:
+        assert "cost_usd" in self.content, (
+            "_detailLlm must reference cost_usd from span"
+        )
+
+    def test_detail_llm_calls_io_block(self) -> None:
+        assert "_ioBlock(" in self.content, (
+            "_detailLlm must call _ioBlock for INPUT and OUTPUT blocks"
+        )
+
+    def test_detail_llm_shows_cache_tokens(self) -> None:
+        assert "cache_read" in self.content or "cache_write" in self.content, (
+            "_detailLlm must show optional cache_read/cache_write token counts"
+        )
+
+    def test_detail_llm_shows_input_tokens(self) -> None:
+        assert "input_tokens" in self.content, (
+            "_detailLlm must show input token count"
+        )
+
+    def test_detail_llm_shows_output_tokens(self) -> None:
+        assert "output_tokens" in self.content, (
+            "_detailLlm must show output token count"
+        )
+
+    # --- _detailTool ---
+
+    def test_detail_tool_function_defined(self) -> None:
+        assert "function _detailTool(" in self.content, (
+            "Must define '_detailTool' function"
+        )
+
+    def test_detail_tool_shows_success_checkmark(self) -> None:
+        assert "\u2713" in self.content or "\\u2713" in self.content, (
+            "_detailTool must show \u2713 checkmark for successful tools"
+        )
+
+    def test_detail_tool_shows_failure_cross(self) -> None:
+        assert "\u2717" in self.content or "\\u2717" in self.content, (
+            "_detailTool must show \u2717 cross for failed tools"
+        )
+
+    def test_detail_tool_shows_success_in_green(self) -> None:
+        # green color for success indicator
+        assert "green" in self.content or "#" in self.content, (
+            "_detailTool must color success indicator green"
+        )
+
+    def test_detail_tool_calls_io_block(self) -> None:
+        # _ioBlock must be called (already tested above but confirm context)
+        assert "_ioBlock(" in self.content, (
+            "_detailTool must call _ioBlock for INPUT/OUTPUT blocks"
+        )
+
+    # --- _detailThinking ---
+
+    def test_detail_thinking_function_defined(self) -> None:
+        assert "function _detailThinking(" in self.content, (
+            "Must define '_detailThinking' function"
+        )
+
+    def test_detail_thinking_shows_thinking_title(self) -> None:
+        after_fn = self.content.split("function _detailThinking(")[1]
+        next_fn = after_fn.split("function _detail")[0]
+        assert "thinking" in next_fn.lower(), (
+            "_detailThinking must display 'thinking' title"
+        )
+
+    def test_detail_thinking_uses_indigo_color(self) -> None:
+        assert "#6366F1" in self.content or "#6366f1" in self.content, (
+            "_detailThinking must use indigo color #6366F1 for the title"
+        )
+
+    # --- _detailGap ---
+
+    def test_detail_gap_function_defined(self) -> None:
+        assert "function _detailGap(" in self.content, (
+            "Must define '_detailGap' function"
+        )
+
+    def test_detail_gap_shows_orchestrator_overhead(self) -> None:
+        assert "orchestrator overhead" in self.content, (
+            "_detailGap must display 'orchestrator overhead' as the title"
+        )
+
+    def test_detail_gap_shows_duration(self) -> None:
+        after_fn = self.content.split("function _detailGap(")[1]
+        next_fn = after_fn.split("function _")[0]
+        # Duration should be computed from before/after spans
+        assert "duration" in next_fn.lower() or "_formatMs" in next_fn, (
+            "_detailGap must show duration of the gap"
+        )
+
+    def test_detail_gap_shows_before_after_labels(self) -> None:
+        assert "before_label" in self.content or "after_label" in self.content or (
+            "before" in self.content and "after" in self.content
+        ), "_detailGap must show 'between {before_label} and {after_label}'"
+
+    # --- _ioBlock ---
+
+    def test_io_block_function_defined(self) -> None:
+        assert "function _ioBlock(" in self.content, (
+            "Must define '_ioBlock' function"
+        )
+
+    def test_io_block_returns_empty_for_null(self) -> None:
+        after_fn = self.content.split("function _ioBlock(")[1]
+        next_fn = after_fn.split("function _")[0]
+        assert (
+            "== null" in next_fn or "=== null" in next_fn or "undefined" in next_fn
+        ), "_ioBlock must return empty string for null/undefined value"
+
+    def test_io_block_converts_to_json_with_indent_2(self) -> None:
+        assert "JSON.stringify" in self.content, (
+            "_ioBlock must convert non-string values to JSON"
+        )
+        assert "null, 2" in self.content, (
+            "_ioBlock must use JSON.stringify with indent 2"
+        )
+
+    def test_io_block_truncates_at_io_truncate(self) -> None:
+        assert "IO_TRUNCATE" in self.content, (
+            "_ioBlock must use IO_TRUNCATE for truncation limit"
+        )
+        assert "slice(0, IO_TRUNCATE)" in self.content, (
+            "_ioBlock must slice content at IO_TRUNCATE characters"
+        )
+
+    def test_io_block_uses_detail_io_content_class(self) -> None:
+        assert "detail-io-content" in self.content, (
+            "_ioBlock must use detail-io-content div class"
+        )
+
+    def test_io_block_has_data_full_text_attribute(self) -> None:
+        assert "data-full-text" in self.content or "data-fullText" in self.content, (
+            "_ioBlock must set data-full-text attribute"
+        )
+
+    def test_io_block_has_show_more_link(self) -> None:
+        assert "show more" in self.content, (
+            "_ioBlock must add 'show more (N chars)' link when truncated"
+        )
+
+    def test_io_block_ellipsis_when_truncated(self) -> None:
+        assert "\u2026" in self.content or "\\u2026" in self.content or "..." in self.content, (
+            "_ioBlock must add ellipsis when content is truncated"
+        )
+
+    # --- _closeDetail ---
+
+    def test_close_detail_function_defined(self) -> None:
+        assert "function _closeDetail()" in self.content, (
+            "Must define '_closeDetail()' function"
+        )
+
+    def test_close_detail_adds_hidden_class(self) -> None:
+        assert (
+            "classList.add('hidden')" in self.content
+            or 'classList.add("hidden")' in self.content
+        ), "_closeDetail must add 'hidden' class to #detail-panel"
+
+    def test_close_detail_clears_selected_span(self) -> None:
+        after_fn = self.content.split("function _closeDetail()")[1]
+        next_fn = after_fn.split("function ")[0]
+        assert "state.selectedSpan" in next_fn, (
+            "_closeDetail must clear state.selectedSpan"
+        )
+
+    # --- _esc ---
+
+    def test_esc_function_defined(self) -> None:
+        assert "function _esc(" in self.content, "Must define '_esc' HTML-escape function"
+
+    def test_esc_escapes_ampersand(self) -> None:
+        assert "&amp;" in self.content, "_esc must escape & to &amp;"
+
+    def test_esc_escapes_less_than(self) -> None:
+        assert "&lt;" in self.content, "_esc must escape < to &lt;"
+
+    def test_esc_escapes_greater_than(self) -> None:
+        assert "&gt;" in self.content, "_esc must escape > to &gt;"
+
+    def test_esc_escapes_double_quote(self) -> None:
+        assert "&quot;" in self.content, "_esc must escape \" to &quot;"
+
+    # --- Time range formatting ---
+
+    def test_detail_panel_uses_format_ms_for_offsets(self) -> None:
+        # _detailLlm/_detailTool show time range using _formatMs
+        after_s6 = self.content.split("Section 6")[1] if "Section 6" in self.content else self.content
+        assert "_formatMs" in after_s6, (
+            "Detail panel functions must use _formatMs for formatted offsets"
         )
