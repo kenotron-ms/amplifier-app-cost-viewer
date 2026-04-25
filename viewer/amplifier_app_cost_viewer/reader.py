@@ -328,7 +328,14 @@ def discover_sessions(amplifier_home: Path) -> dict[str, SessionNode]:
             metadata = json.loads(metadata_path.read_text())
             session_id = metadata["session_id"]
             parent_id = metadata.get("parent_id")  # None or str
-            project_slug = metadata["project_slug"]
+            # project_slug: top-level (test/synthetic format), then
+            # config.project_slug (child session format), then derive
+            # from the project directory name (real root session format).
+            project_slug = (
+                metadata.get("project_slug")
+                or metadata.get("config", {}).get("project_slug")
+                or session_dir.parent.parent.name
+            )
             created = metadata["created"]
 
             # Compute duration_ms using normalize_timestamps and _read_events

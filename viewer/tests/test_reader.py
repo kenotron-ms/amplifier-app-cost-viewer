@@ -533,3 +533,113 @@ class TestBuildSessionTree:
         assert len(roots) >= 2
         # Most recent root should be first
         assert roots[0].session_id == "root-aabbccdd"
+
+
+# ---------------------------------------------------------------------------
+# TestDiscoverSessionsRealMetadataFormat (2 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverSessionsRealMetadataFormat:
+    """Test that discover_sessions handles real Amplifier metadata format.
+
+    Real sessions store project_slug in config.project_slug (or not at all
+    at the top level), unlike the synthetic test fixtures which put it at
+    the top level.
+    """
+
+    def test_real_root_metadata_format_is_discovered(self, tmp_path: Path):
+        """Real root sessions (no top-level project_slug) are discovered."""
+        import json as _json
+        from amplifier_app_cost_viewer.reader import discover_sessions
+
+        # Create a session with real Amplifier metadata format
+        # (no top-level project_slug; config.project_slug only)
+        project = "real-project"
+        session_id = "real-root-aabbccdd"
+        amp_home = tmp_path / ".amplifier"
+        session_dir = amp_home / "projects" / project / "sessions" / session_id
+        session_dir.mkdir(parents=True)
+
+        # Real root format: project_slug NOT at top level
+        metadata = {
+            "session_id": session_id,
+            "parent_id": None,
+            "created": "2026-04-24T10:00:00.000+00:00",
+            "bundle": "foundation",
+            "model": "claude-sonnet-4-5",
+            "turn_count": 5,
+            "working_dir": "/home/user/project",
+            "name": "My session",
+        }
+        (session_dir / "metadata.json").write_text(_json.dumps(metadata))
+
+        events = "\n".join(
+            [
+                _json.dumps(
+                    {
+                        "event": "session:start",
+                        "ts": "2026-04-24T10:00:00.000+00:00",
+                        "data": {"session_id": session_id},
+                    }
+                ),
+                _json.dumps(
+                    {
+                        "event": "session:end",
+                        "ts": "2026-04-24T10:00:30.000+00:00",
+                        "data": {},
+                    }
+                ),
+            ]
+        )
+        (session_dir / "events.jsonl").write_text(events)
+
+        sessions = discover_sessions(amp_home)
+        assert session_id in sessions, (
+            "Real-format metadata (no top-level project_slug) should be discovered"
+        )
+
+    def test_real_root_metadata_derives_project_slug_from_directory(
+        self, tmp_path: Path
+    ):
+        """When project_slug is absent, it is derived from the project dir name."""
+        import json as _json
+        from amplifier_app_cost_viewer.reader import discover_sessions
+
+        project = "derived-project-slug"
+        session_id = "derived-root-12345678"
+        amp_home = tmp_path / ".amplifier"
+        session_dir = amp_home / "projects" / project / "sessions" / session_id
+        session_dir.mkdir(parents=True)
+
+        # No project_slug anywhere in metadata
+        metadata = {
+            "session_id": session_id,
+            "parent_id": None,
+            "created": "2026-04-24T10:00:00.000+00:00",
+        }
+        (session_dir / "metadata.json").write_text(_json.dumps(metadata))
+
+        events = "\n".join(
+            [
+                _json.dumps(
+                    {
+                        "event": "session:start",
+                        "ts": "2026-04-24T10:00:00.000+00:00",
+                        "data": {"session_id": session_id},
+                    }
+                ),
+                _json.dumps(
+                    {
+                        "event": "session:end",
+                        "ts": "2026-04-24T10:00:30.000+00:00",
+                        "data": {},
+                    }
+                ),
+            ]
+        )
+        (session_dir / "events.jsonl").write_text(events)
+
+        sessions = discover_sessions(amp_home)
+        assert session_id in sessions
+        assert sessions[session_id].project_slug == project
