@@ -87,13 +87,19 @@ function renderToolbar() {
   });
 
   document.getElementById('refresh-btn').addEventListener('click', async () => {
-    state.sessions = [];
-    state.activeSessionId = null;
-    await fetchSessions();
-    if (state.sessions.length > 0) {
-      await loadSession(state.sessions[0].session_id);
-    } else {
-      renderToolbar();
+    try {
+      state.sessions = [];
+      state.activeSessionId = null;
+      await fetchSessions();
+      if (state.sessions.length > 0) {
+        await loadSession(state.sessions[0].session_id);
+      } else {
+        renderToolbar();
+      }
+    } catch (err) {
+      console.error('Refresh failed:', err);
+      document.getElementById('tree-panel').innerHTML =
+        `<div class="panel-placeholder" style="color:#f85149">Refresh failed: ${err.message}</div>`;
     }
   });
 }
@@ -179,7 +185,13 @@ async function init() {
   renderToolbar();
 
   if (state.sessions.length > 0) {
-    await loadSession(state.sessions[0].session_id);
+    try {
+      await loadSession(state.sessions[0].session_id);
+    } catch (err) {
+      console.error('Failed to load session:', err);
+      document.getElementById('tree-panel').innerHTML =
+        `<div class="panel-placeholder" style="color:#f85149">Error: ${err.message}</div>`;
+    }
   } else {
     document.getElementById('tree-panel').innerHTML =
       '<div class="panel-placeholder">No sessions found in ~/.amplifier/projects/</div>';

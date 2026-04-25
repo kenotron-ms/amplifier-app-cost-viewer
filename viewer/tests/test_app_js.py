@@ -362,3 +362,20 @@ class TestSection7Init:
             "Must add 'DOMContentLoaded' event listener"
         )
         assert "init" in self.content, "DOMContentLoaded listener must call init"
+
+    def test_refresh_button_handler_has_error_handling(self) -> None:
+        # Refresh click handler must catch errors so state corruption is visible to user
+        assert "Refresh failed" in self.content, (
+            "Refresh button click handler must catch errors and display 'Refresh failed' feedback"
+        )
+
+    def test_init_load_session_wrapped_in_try_catch(self) -> None:
+        # loadSession in init() must be protected so a corrupt first session doesn't produce
+        # an unhandled promise rejection — look for 'Failed to load session' or 'Error loading'
+        assert (
+            "Failed to load session" in self.content
+            or "Error loading session" in self.content
+        ), (
+            "init() must wrap loadSession() in try/catch and log the error "
+            "(e.g., console.error('Failed to load session:', err))"
+        )
