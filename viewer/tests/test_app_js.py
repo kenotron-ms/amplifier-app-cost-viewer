@@ -1,0 +1,364 @@
+"""Tests for app.js structure \u2014 written FIRST before the file exists (TDD RED).
+
+Tests verify that app.js contains the required sections, functions, and patterns
+per the Task 7 spec: Sections 1\u20133 and 7 plus stubs for 4\u20136.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Path
+# ---------------------------------------------------------------------------
+
+APP_JS = (
+    Path(__file__).parent.parent / "amplifier_app_cost_viewer" / "static" / "app.js"
+)
+
+
+# ---------------------------------------------------------------------------
+# Tests: file existence
+# ---------------------------------------------------------------------------
+
+
+class TestAppJsExists:
+    def test_file_exists(self) -> None:
+        assert APP_JS.exists(), f"{APP_JS} must exist"
+
+    def test_not_empty(self) -> None:
+        assert APP_JS.stat().st_size > 0, "app.js must not be empty"
+
+    def test_has_substantial_content(self) -> None:
+        content = APP_JS.read_text()
+        assert len(content) > 500, "app.js must have substantial content (>500 chars)"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Section 1 \u2014 State
+# ---------------------------------------------------------------------------
+
+
+class TestSection1State:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_const_state_object_declared(self) -> None:
+        assert "const state = {" in self.content or "const state={" in self.content, (
+            "Must declare 'const state = {'"
+        )
+
+    def test_state_has_sessions_array(self) -> None:
+        assert "sessions: []" in self.content or "sessions:[]" in self.content, (
+            "state must have sessions: []"
+        )
+
+    def test_state_has_active_session_id(self) -> None:
+        assert "activeSessionId:" in self.content, (
+            "state must have activeSessionId property"
+        )
+
+    def test_state_has_session_data(self) -> None:
+        assert "sessionData:" in self.content, "state must have sessionData property"
+
+    def test_state_has_spans_array(self) -> None:
+        assert "spans: []" in self.content or "spans:[]" in self.content, (
+            "state must have spans: []"
+        )
+
+    def test_state_has_selected_span(self) -> None:
+        assert "selectedSpan:" in self.content, "state must have selectedSpan property"
+
+    def test_state_has_time_scale(self) -> None:
+        assert "timeScale:" in self.content, "state must have timeScale property"
+
+    def test_expanded_nodes_set_declared(self) -> None:
+        assert (
+            "const expandedNodes = new Set()" in self.content
+            or "const expandedNodes=new Set()" in self.content
+        ), "Must declare 'const expandedNodes = new Set()'"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Section 2 \u2014 API calls
+# ---------------------------------------------------------------------------
+
+
+class TestSection2ApiCalls:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_fetch_sessions_function_defined(self) -> None:
+        assert "async function fetchSessions()" in self.content, (
+            "Must define 'async function fetchSessions()'"
+        )
+
+    def test_fetch_sessions_calls_api(self) -> None:
+        assert (
+            "'/api/sessions'" in self.content
+            or '"/api/sessions"' in self.content
+            or "'/api/sessions'" in self.content
+        ), "fetchSessions must call GET /api/sessions"
+
+    def test_fetch_sessions_stores_to_state(self) -> None:
+        assert "state.sessions" in self.content, (
+            "fetchSessions must store result in state.sessions"
+        )
+
+    def test_fetch_sessions_throws_on_non_ok(self) -> None:
+        # Should check resp.ok and throw
+        assert "resp.ok" in self.content or "response.ok" in self.content, (
+            "fetchSessions must check resp.ok and throw on failure"
+        )
+        assert "throw new Error" in self.content, (
+            "Must throw new Error on non-ok response"
+        )
+
+    def test_fetch_session_function_defined(self) -> None:
+        assert (
+            "async function fetchSession(id)" in self.content
+            or "async function fetchSession(id )" in self.content
+        ), "Must define 'async function fetchSession(id)'"
+
+    def test_fetch_session_uses_encode_uri(self) -> None:
+        assert "encodeURIComponent(id)" in self.content, (
+            "fetchSession must use encodeURIComponent(id)"
+        )
+
+    def test_fetch_session_stores_to_state(self) -> None:
+        assert "state.sessionData" in self.content, (
+            "fetchSession must store result in state.sessionData"
+        )
+
+    def test_fetch_spans_function_defined(self) -> None:
+        assert (
+            "async function fetchSpans(id)" in self.content
+            or "async function fetchSpans(id )" in self.content
+        ), "Must define 'async function fetchSpans(id)'"
+
+    def test_fetch_spans_uses_encode_uri(self) -> None:
+        # encodeURIComponent must appear at least twice (once for fetchSession, once for fetchSpans)
+        count = self.content.count("encodeURIComponent")
+        assert count >= 2, (
+            f"encodeURIComponent must be used in both fetchSession and fetchSpans, found {count} occurrences"
+        )
+
+    def test_fetch_spans_stores_to_state(self) -> None:
+        assert "state.spans" in self.content, (
+            "fetchSpans must store result in state.spans"
+        )
+
+    def test_fetch_spans_calls_spans_endpoint(self) -> None:
+        assert "/spans" in self.content, "fetchSpans must call .../spans endpoint"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Section 3 \u2014 Toolbar rendering
+# ---------------------------------------------------------------------------
+
+
+class TestSection3Toolbar:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_render_toolbar_function_defined(self) -> None:
+        assert "function renderToolbar()" in self.content, (
+            "Must define 'function renderToolbar()'"
+        )
+
+    def test_toolbar_computes_total_cost(self) -> None:
+        # Should use reduce to compute totalCost
+        assert "reduce" in self.content, (
+            "renderToolbar must use reduce to compute totalCost"
+        )
+        assert "total_cost_usd" in self.content, (
+            "renderToolbar must reference total_cost_usd from session data"
+        )
+
+    def test_toolbar_has_title_span(self) -> None:
+        assert "toolbar-title" in self.content, (
+            "renderToolbar must include span.toolbar-title"
+        )
+        assert "Cost Viewer" in self.content, "Toolbar title must be 'Cost Viewer'"
+
+    def test_toolbar_has_session_select(self) -> None:
+        assert "session-select" in self.content, (
+            "renderToolbar must include select#session-select"
+        )
+
+    def test_toolbar_options_show_last_8_chars(self) -> None:
+        assert "slice(-8)" in self.content or ".slice(-8)" in self.content, (
+            "Session dropdown options must show last 8 chars of session_id"
+        )
+
+    def test_toolbar_has_cost_total_span(self) -> None:
+        assert "cost-total" in self.content, (
+            "renderToolbar must include span.cost-total"
+        )
+
+    def test_toolbar_has_refresh_button(self) -> None:
+        assert "refresh-btn" in self.content, (
+            "renderToolbar must include button#refresh-btn"
+        )
+
+    def test_toolbar_session_select_change_listener(self) -> None:
+        assert "loadSession" in self.content, (
+            "renderToolbar must wire change listener to loadSession"
+        )
+
+    def test_toolbar_refresh_calls_fetch_sessions(self) -> None:
+        # Refresh button should call fetchSessions and reload
+        assert "fetchSessions" in self.content, "Refresh button must call fetchSessions"
+
+    def test_format_date_function_defined(self) -> None:
+        assert "function _formatDate(" in self.content, (
+            "Must define '_formatDate' helper function"
+        )
+
+    def test_format_date_handles_today(self) -> None:
+        assert "Today" in self.content, "_formatDate must handle 'Today HH:MM' case"
+
+    def test_format_date_handles_yesterday(self) -> None:
+        assert "Yesterday" in self.content, "_formatDate must handle 'Yesterday' case"
+
+    def test_format_date_uses_to_local_date_string(self) -> None:
+        assert "toLocaleDateString" in self.content, (
+            "_formatDate must fall back to toLocaleDateString()"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Stubs for Sections 4-6
+# ---------------------------------------------------------------------------
+
+
+class TestSectionStubs:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_render_tree_panel_stub_exists(self) -> None:
+        assert "function renderTreePanel()" in self.content, (
+            "Must have renderTreePanel() stub"
+        )
+
+    def test_render_gantt_stub_exists(self) -> None:
+        assert "function renderGantt()" in self.content, "Must have renderGantt() stub"
+
+    def test_render_detail_stub_exists(self) -> None:
+        assert "function renderDetail()" in self.content, (
+            "Must have renderDetail() stub"
+        )
+
+    def test_select_span_stub_exists(self) -> None:
+        assert "function selectSpan(" in self.content, "Must have selectSpan() stub"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Section 7 \u2014 Init / loadSession
+# ---------------------------------------------------------------------------
+
+
+class TestSection7Init:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_load_session_function_defined(self) -> None:
+        assert "async function loadSession(id)" in self.content, (
+            "Must define 'async function loadSession(id)'"
+        )
+
+    def test_load_session_sets_active_id(self) -> None:
+        assert (
+            "state.activeSessionId = id" in self.content
+            or "state.activeSessionId=id" in self.content
+        ), "loadSession must set state.activeSessionId = id"
+
+    def test_load_session_fetches_session(self) -> None:
+        assert (
+            "fetchSession(id)" in self.content
+            or "await fetchSession(id)" in self.content
+        ), "loadSession must call fetchSession(id)"
+
+    def test_load_session_fetches_spans(self) -> None:
+        assert (
+            "fetchSpans(id)" in self.content or "await fetchSpans(id)" in self.content
+        ), "loadSession must call fetchSpans(id)"
+
+    def test_load_session_auto_expands_root(self) -> None:
+        assert "expandedNodes.add(id)" in self.content, (
+            "loadSession must auto-expand root in expandedNodes"
+        )
+
+    def test_load_session_auto_expands_children(self) -> None:
+        # Should add immediate children to expandedNodes
+        assert "expandedNodes.add(" in self.content, (
+            "loadSession must add children to expandedNodes"
+        )
+        assert "children" in self.content, (
+            "loadSession must reference sessionData.children"
+        )
+
+    def test_load_session_computes_time_scale(self) -> None:
+        assert "state.timeScale" in self.content, (
+            "loadSession must compute state.timeScale"
+        )
+        assert (
+            "maxEndMs" in self.content
+            or "max_end_ms" in self.content
+            or "end_ms" in self.content
+        ), "loadSession must compute timeScale from max end_ms"
+
+    def test_load_session_clamps_gantt_width(self) -> None:
+        # Should clamp to min 400
+        assert "400" in self.content, (
+            "loadSession must clamp gantt width to minimum 400"
+        )
+
+    def test_load_session_calls_render_toolbar(self) -> None:
+        assert "renderToolbar()" in self.content, (
+            "loadSession must call renderToolbar()"
+        )
+
+    def test_load_session_calls_render_tree_panel(self) -> None:
+        assert "renderTreePanel()" in self.content, (
+            "loadSession must call renderTreePanel()"
+        )
+
+    def test_load_session_calls_render_gantt(self) -> None:
+        assert "renderGantt()" in self.content, "loadSession must call renderGantt()"
+
+    def test_init_function_defined(self) -> None:
+        assert "async function init()" in self.content, (
+            "Must define 'async function init()'"
+        )
+
+    def test_init_fetches_sessions(self) -> None:
+        assert "fetchSessions" in self.content, "init must call fetchSessions"
+
+    def test_init_renders_toolbar(self) -> None:
+        assert "renderToolbar" in self.content, "init must call renderToolbar"
+
+    def test_init_loads_first_session(self) -> None:
+        assert "sessions[0]" in self.content, (
+            "init must load the first session with sessions[0]"
+        )
+
+    def test_init_handles_no_sessions(self) -> None:
+        # Should show 'No sessions found' message
+        assert "No sessions" in self.content, (
+            "init must show 'No sessions found' message when no sessions"
+        )
+
+    def test_init_handles_errors(self) -> None:
+        assert "catch" in self.content, "init must handle errors with try/catch"
+        assert (
+            "color:#f85149" in self.content
+            or "color: #f85149" in self.content
+            or "#f85149" in self.content
+        ), "init must display error in red (danger color #f85149)"
+
+    def test_dom_content_loaded_listener(self) -> None:
+        assert "DOMContentLoaded" in self.content, (
+            "Must add 'DOMContentLoaded' event listener"
+        )
+        assert "init" in self.content, "DOMContentLoaded listener must call init"
