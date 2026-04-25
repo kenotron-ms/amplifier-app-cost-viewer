@@ -1,1 +1,29 @@
-<!DOCTYPE html><html><body>placeholder</body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Amplifier Cost Viewer</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header id="toolbar">
+    <span class="toolbar-title">Amplifier Cost Viewer</span>
+  </header>
+
+  <main id="main">
+    <aside id="tree-panel">
+      <div class="panel-placeholder">Loading sessions…</div>
+    </aside>
+
+    <section id="gantt-panel">
+      <div id="time-ruler"></div>
+      <div id="gantt-rows"></div>
+    </section>
+  </main>
+
+  <footer id="detail-panel" class="hidden"></footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
