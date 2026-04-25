@@ -134,7 +134,89 @@ function _formatDate(isoStr) {
 // Section 4: Tree panel rendering  (added in Task 8)
 // ================================================================
 
-function renderTreePanel() { /* stub — replaced in Task 8 */ }
+function renderTreePanel() {
+  const panel = document.getElementById('tree-panel');
+  panel.innerHTML = '';
+
+  if (!state.sessionData) {
+    panel.innerHTML = '<div class="panel-placeholder">No session loaded.</div>';
+    return;
+  }
+
+  _renderTreeNode(panel, state.sessionData, 0);
+}
+
+function _renderTreeNode(container, node, depth) {
+  const sessionId = node.session_id;
+  const isExpanded = expandedNodes.has(sessionId);
+  const hasChildren = node.children && node.children.length > 0;
+
+  const row = document.createElement('div');
+  row.className = 'tree-row' + (sessionId === state.activeSessionId ? ' active' : '');
+  row.dataset.sessionId = sessionId;
+
+  // Indent span — width = depth * 12px
+  const indentSpan = document.createElement('span');
+  indentSpan.className = 'tree-indent';
+  indentSpan.style.display = 'inline-block';
+  indentSpan.style.width = `${depth * 12}px`;
+  row.appendChild(indentSpan);
+
+  // Toggle span — ▾ if expanded, ▸ if collapsed, &nbsp; if no children
+  const toggleSpan = document.createElement('span');
+  toggleSpan.className = 'tree-toggle';
+  if (hasChildren) {
+    toggleSpan.textContent = isExpanded ? '\u25be' : '\u25b8';
+  } else {
+    toggleSpan.innerHTML = '&nbsp;';
+  }
+  row.appendChild(toggleSpan);
+
+  // Session label span — last 8 chars of session_id, optionally '· agentName'
+  const labelSpan = document.createElement('span');
+  labelSpan.className = 'session-label';
+  const shortId = sessionId.slice(-8);
+  const agentName = node.agent_name || node.agentName || null;
+  labelSpan.textContent = agentName ? `${shortId} \u00b7 ${agentName}` : shortId;
+  labelSpan.title = sessionId;
+  row.appendChild(labelSpan);
+
+  // Session cost span — $X.XXXX of total_cost_usd
+  const costSpan = document.createElement('span');
+  costSpan.className = 'session-cost';
+  const cost = node.total_cost_usd || 0;
+  costSpan.textContent = `$${cost.toFixed(4)}`;
+  row.appendChild(costSpan);
+
+  // Click handler — toggles expand/collapse, re-renders tree, scrolls Gantt
+  row.addEventListener('click', () => {
+    if (hasChildren) {
+      if (expandedNodes.has(sessionId)) {
+        expandedNodes.delete(sessionId);
+      } else {
+        expandedNodes.add(sessionId);
+      }
+    }
+    renderTreePanel();
+    _scrollGanttToSession(sessionId);
+  });
+
+  container.appendChild(row);
+
+  // Recursively render children if expanded
+  if (isExpanded && hasChildren) {
+    node.children.forEach(child => _renderTreeNode(container, child, depth + 1));
+  }
+}
+
+function _scrollGanttToSession(sessionId) {
+  const ganttRows = document.getElementById('gantt-rows');
+  if (!ganttRows) return;
+  const el = ganttRows.querySelector(`g[data-session-id='${sessionId}']`);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
 
 
 // ================================================================

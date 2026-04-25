@@ -254,6 +254,178 @@ class TestSectionStubs:
 
 
 # ---------------------------------------------------------------------------
+# Tests: Section 4 — Tree panel rendering (Task 8)
+# ---------------------------------------------------------------------------
+
+
+class TestSection4TreePanel:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    # --- renderTreePanel ---
+
+    def test_render_tree_panel_is_not_a_stub(self) -> None:
+        """renderTreePanel must be fully implemented, not just a comment stub."""
+        assert "/* stub" not in self.content.split("function renderTreePanel()")[1].split(
+            "function "
+        )[0], "renderTreePanel() must not be a stub comment"
+
+    def test_render_tree_panel_clears_tree_panel_element(self) -> None:
+        assert "tree-panel" in self.content, (
+            "renderTreePanel must reference #tree-panel element"
+        )
+        assert "innerHTML" in self.content, (
+            "renderTreePanel must clear innerHTML of #tree-panel"
+        )
+
+    def test_render_tree_panel_shows_no_session_when_no_data(self) -> None:
+        assert "No session loaded" in self.content, (
+            "renderTreePanel must show 'No session loaded.' when sessionData is null"
+        )
+
+    def test_render_tree_panel_calls_render_tree_node(self) -> None:
+        assert "_renderTreeNode(" in self.content, (
+            "renderTreePanel must call _renderTreeNode()"
+        )
+        # Should call with depth 0 for root
+        assert "_renderTreeNode(panel, state.sessionData, 0)" in self.content or (
+            "_renderTreeNode(" in self.content and "0)" in self.content
+        ), "renderTreePanel must call _renderTreeNode with depth 0"
+
+    # --- _renderTreeNode ---
+
+    def test_render_tree_node_function_defined(self) -> None:
+        assert "function _renderTreeNode(" in self.content, (
+            "Must define '_renderTreeNode' function"
+        )
+
+    def test_render_tree_node_creates_tree_row_div(self) -> None:
+        assert "tree-row" in self.content, (
+            "_renderTreeNode must create div with class 'tree-row'"
+        )
+
+    def test_render_tree_node_sets_dataset_session_id(self) -> None:
+        assert "dataset.sessionId" in self.content or "data-session-id" in self.content, (
+            "_renderTreeNode must set dataset.sessionId on the row"
+        )
+
+    def test_render_tree_node_adds_active_class(self) -> None:
+        assert "active" in self.content, (
+            "_renderTreeNode must add 'active' class when node matches activeSessionId"
+        )
+        assert "activeSessionId" in self.content, (
+            "_renderTreeNode must check state.activeSessionId"
+        )
+
+    def test_render_tree_node_renders_indent_span(self) -> None:
+        assert "indent" in self.content or "depth" in self.content, (
+            "_renderTreeNode must render indent span based on depth"
+        )
+        assert "12" in self.content, (
+            "Indent width must be depth * 12px"
+        )
+
+    def test_render_tree_node_renders_toggle_span(self) -> None:
+        # Should have expand/collapse triangles
+        # ▾ (25BE) and ▸ (25B8)
+        assert (
+            "\u25be" in self.content
+            or "\\u25be" in self.content
+            or "&#9662;" in self.content
+            or "\u25b8" in self.content
+            or "\\u25b8" in self.content
+            or "&#9656;" in self.content
+        ), "_renderTreeNode must render toggle span with triangle characters (▾/▸)"
+
+    def test_render_tree_node_renders_session_label(self) -> None:
+        assert "session-label" in self.content, (
+            "_renderTreeNode must render span with class 'session-label'"
+        )
+
+    def test_render_tree_node_label_shows_last_8_chars(self) -> None:
+        # slice(-8) should appear multiple times (toolbar + tree)
+        count = self.content.count("slice(-8)")
+        assert count >= 2, (
+            f"session label must show last 8 chars via slice(-8), found {count} occurrences"
+        )
+
+    def test_render_tree_node_label_shows_agent_name(self) -> None:
+        assert "agent" in self.content.lower(), (
+            "_renderTreeNode must optionally show agent name"
+        )
+
+    def test_render_tree_node_label_has_title_attribute(self) -> None:
+        assert "title" in self.content, (
+            "_renderTreeNode must set title attribute to full session_id"
+        )
+
+    def test_render_tree_node_renders_cost_span(self) -> None:
+        assert "session-cost" in self.content, (
+            "_renderTreeNode must render span with class 'session-cost'"
+        )
+        assert "total_cost_usd" in self.content, (
+            "_renderTreeNode must display total_cost_usd"
+        )
+
+    def test_render_tree_node_click_handler_toggles_expansion(self) -> None:
+        assert "expandedNodes" in self.content, (
+            "_renderTreeNode click handler must use expandedNodes set"
+        )
+        assert (
+            "expandedNodes.has(" in self.content or "expandedNodes.delete(" in self.content
+        ), "_renderTreeNode click handler must toggle node in expandedNodes"
+
+    def test_render_tree_node_click_calls_render_tree_panel(self) -> None:
+        # The click handler should re-render the tree panel
+        assert "renderTreePanel()" in self.content, (
+            "_renderTreeNode click handler must call renderTreePanel() to re-render"
+        )
+
+    def test_render_tree_node_click_calls_scroll_gantt(self) -> None:
+        assert "_scrollGanttToSession(" in self.content, (
+            "_renderTreeNode click handler must call _scrollGanttToSession()"
+        )
+
+    def test_render_tree_node_renders_children_recursively(self) -> None:
+        # Should recursively call _renderTreeNode for children
+        assert "children" in self.content, (
+            "_renderTreeNode must handle children array"
+        )
+        # Check recursive call pattern
+        assert (
+            "_renderTreeNode(container" in self.content
+            or "_renderTreeNode(panel" in self.content
+            or "forEach" in self.content
+        ), "_renderTreeNode must recursively render children"
+
+    # --- _scrollGanttToSession ---
+
+    def test_scroll_gantt_function_defined(self) -> None:
+        assert "function _scrollGanttToSession(" in self.content, (
+            "Must define '_scrollGanttToSession' function"
+        )
+
+    def test_scroll_gantt_queries_by_data_attribute(self) -> None:
+        assert "gantt-rows" in self.content, (
+            "_scrollGanttToSession must query #gantt-rows"
+        )
+        assert "data-session-id" in self.content, (
+            "_scrollGanttToSession must query by data-session-id attribute"
+        )
+
+    def test_scroll_gantt_calls_scroll_into_view(self) -> None:
+        assert "scrollIntoView" in self.content, (
+            "_scrollGanttToSession must call scrollIntoView"
+        )
+        assert "smooth" in self.content, (
+            "_scrollGanttToSession must use smooth scrolling"
+        )
+        assert "nearest" in self.content, (
+            "_scrollGanttToSession must use block:'nearest'"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Tests: Section 7 \u2014 Init / loadSession
 # ---------------------------------------------------------------------------
 
