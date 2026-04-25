@@ -85,8 +85,7 @@ function renderToolbar() {
   document.getElementById('session-select').addEventListener('change', e => {
     loadSession(e.target.value).catch(err => {
       console.error('Failed to switch session:', err);
-      document.getElementById('tree-panel').innerHTML =
-        `<div class="panel-placeholder" style="color:#f85149">Error: ${err.message}</div>`;
+      _showError(`Error: ${err.message}`);
     });
   });
 
@@ -101,10 +100,15 @@ function renderToolbar() {
       }
     } catch (err) {
       console.error('Refresh failed:', err);
-      document.getElementById('tree-panel').innerHTML =
-        `<div class="panel-placeholder" style="color:#f85149">Refresh failed: ${err.message}</div>`;
+      _showError(`Refresh failed: ${err.message}`);
     }
   });
+}
+
+function _showError(msg) {
+  const el = document.getElementById('tree-panel');
+  if (el) el.innerHTML =
+    `<div class="panel-placeholder" style="color:#f85149">${msg}</div>`;
 }
 
 function _formatDate(isoStr) {
@@ -166,7 +170,8 @@ async function loadSession(id) {
   }
 
   // Compute timeScale: fit the full timeline into the visible Gantt width
-  const maxEndMs = Math.max(...state.spans.map(s => s.end_ms || 0), 1);
+  // Use reduce instead of spread to avoid RangeError on very large span arrays.
+  const maxEndMs = state.spans.reduce((m, s) => Math.max(m, s.end_ms || 0), 1);
   const ganttWidth = document.getElementById('gantt-panel').clientWidth || 1000;
   state.timeScale = maxEndMs / Math.max(ganttWidth - 80, 400);
 
@@ -180,8 +185,7 @@ async function init() {
     await fetchSessions();
   } catch (err) {
     console.error('Failed to fetch sessions:', err);
-    document.getElementById('tree-panel').innerHTML =
-      `<div class="panel-placeholder" style="color:#f85149">Error: ${err.message}</div>`;
+    _showError(`Error: ${err.message}`);
     return;
   }
 
@@ -192,8 +196,7 @@ async function init() {
       await loadSession(state.sessions[0].session_id);
     } catch (err) {
       console.error('Failed to load session:', err);
-      document.getElementById('tree-panel').innerHTML =
-        `<div class="panel-placeholder" style="color:#f85149">Error: ${err.message}</div>`;
+      _showError(`Error: ${err.message}`);
     }
   } else {
     document.getElementById('tree-panel').innerHTML =
