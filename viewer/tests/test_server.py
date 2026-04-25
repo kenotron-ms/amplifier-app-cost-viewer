@@ -425,6 +425,29 @@ def test_sessions_list_does_not_load_spans(
     )
 
 
+def test_refresh_endpoint_clears_cache(client: TestClient, amp_home: Path) -> None:
+    """POST /api/refresh returns 200 with ok=True and clears _roots_cache."""
+    import amplifier_app_cost_viewer.server as server_mod
+
+    # Populate cache first via list call
+    client.get("/api/sessions")
+    assert server_mod._roots_cache is not None, (
+        "cache must be populated after GET /api/sessions"
+    )
+
+    # Refresh should clear the cache
+    response = client.post("/api/refresh")
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("ok") is True
+    assert server_mod._roots_cache is None, (
+        "cache must be cleared after POST /api/refresh"
+    )
+    assert server_mod._loaded_cache == {}, (
+        "_loaded_cache must be cleared after POST /api/refresh"
+    )
+
+
 def test_spans_loaded_on_session_detail(
     client: TestClient, amp_home: Path, monkeypatch
 ) -> None:

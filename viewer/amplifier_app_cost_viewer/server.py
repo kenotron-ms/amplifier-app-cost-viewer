@@ -125,10 +125,10 @@ def _flatten_spans(node: SessionNode, depth: int = 0) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def _get_roots() -> list[SessionNode]:
+def _get_roots(force: bool = False) -> list[SessionNode]:
     """Return cached root sessions, populating from disk on first call."""
     global _roots_cache
-    if _roots_cache is None:
+    if _roots_cache is None or force:
         _roots_cache = build_session_tree(AMPLIFIER_HOME)
     return _roots_cache
 
@@ -191,6 +191,15 @@ def _load_session(session_id: str) -> SessionNode | None:
 # ---------------------------------------------------------------------------
 # API routes
 # ---------------------------------------------------------------------------
+
+
+@app.post("/api/refresh")
+def refresh_sessions() -> dict:
+    """Clear the in-memory session cache, forcing a rescan on next request."""
+    global _roots_cache, _loaded_cache
+    _roots_cache = None
+    _loaded_cache = {}
+    return {"ok": True}
 
 
 @app.get("/api/sessions")

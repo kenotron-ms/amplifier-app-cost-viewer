@@ -125,7 +125,8 @@ function renderToolbar() {
 
   document.getElementById('refresh-btn').addEventListener('click', async () => {
     try {
-      await fetchSessions();
+      await fetch('/api/refresh', {method: 'POST'});  // clear server cache
+      await fetchSessions(0);  // reset to page 1
       state.activeSessionId = null;
       if (state.sessions.length > 0) {
         await loadSession(state.sessions[0].session_id);
