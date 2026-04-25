@@ -568,3 +568,337 @@ class TestSection7Init:
             "Refresh handler must not pre-clear state.sessions before fetchSessions() "
             "succeeds — mutate state only after the network call completes successfully"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Section 5 — Gantt SVG rendering (Task 9)
+# ---------------------------------------------------------------------------
+
+
+class TestSection5GanttConstants:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_row_height_constant_defined(self) -> None:
+        assert "ROW_HEIGHT" in self.content, "Must define ROW_HEIGHT constant"
+        assert "ROW_HEIGHT = 32" in self.content or "ROW_HEIGHT=32" in self.content, (
+            "ROW_HEIGHT must equal 32"
+        )
+
+    def test_span_h_constant_defined(self) -> None:
+        assert "SPAN_H" in self.content, "Must define SPAN_H constant"
+        assert "SPAN_H = 20" in self.content or "SPAN_H=20" in self.content, (
+            "SPAN_H must equal 20"
+        )
+
+    def test_span_y_off_constant_defined(self) -> None:
+        assert "SPAN_Y_OFF" in self.content, "Must define SPAN_Y_OFF constant"
+        assert "SPAN_Y_OFF = 6" in self.content or "SPAN_Y_OFF=6" in self.content, (
+            "SPAN_Y_OFF must equal 6"
+        )
+
+    def test_min_bar_w_constant_defined(self) -> None:
+        assert "MIN_BAR_W" in self.content, "Must define MIN_BAR_W constant"
+        assert "MIN_BAR_W = 2" in self.content or "MIN_BAR_W=2" in self.content, (
+            "MIN_BAR_W must equal 2"
+        )
+
+
+class TestSection5RenderGantt:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_render_gantt_is_not_a_stub(self) -> None:
+        """renderGantt must be fully implemented, not just a comment stub."""
+        after_fn = self.content.split("function renderGantt()")[1]
+        next_fn = after_fn.split("function ")[0]
+        assert "/* stub" not in next_fn, "renderGantt() must not be a stub comment"
+
+    def test_render_gantt_clears_gantt_rows(self) -> None:
+        assert "gantt-rows" in self.content, (
+            "renderGantt must reference #gantt-rows element"
+        )
+
+    def test_render_gantt_clears_time_ruler(self) -> None:
+        assert "time-ruler" in self.content, (
+            "renderGantt must reference #time-ruler element"
+        )
+
+    def test_render_gantt_shows_no_spans_message(self) -> None:
+        assert "No spans to display" in self.content, (
+            "renderGantt must show 'No spans to display.' when spans is empty"
+        )
+
+    def test_render_gantt_computes_max_end_ms(self) -> None:
+        assert "maxEndMs" in self.content, (
+            "renderGantt must compute maxEndMs from spans"
+        )
+        assert "end_ms" in self.content, (
+            "renderGantt must use end_ms from spans to compute maxEndMs"
+        )
+
+    def test_render_gantt_computes_svg_width(self) -> None:
+        assert "svgWidth" in self.content, (
+            "renderGantt must compute svgWidth as max of panel width and timeline extent"
+        )
+
+    def test_render_gantt_builds_session_order(self) -> None:
+        assert "sessionOrder" in self.content, (
+            "renderGantt must build sessionOrder via _flattenSessionOrder DFS"
+        )
+        assert "_flattenSessionOrder" in self.content, (
+            "renderGantt must call _flattenSessionOrder to get session order"
+        )
+
+    def test_render_gantt_creates_svg_element(self) -> None:
+        assert "createElementNS" in self.content or "_svgEl(" in self.content, (
+            "renderGantt must create SVG elements using createElementNS or _svgEl helper"
+        )
+
+    def test_render_gantt_alternating_backgrounds(self) -> None:
+        assert "#161b22" in self.content, (
+            "renderGantt must use #161b22 for alternating row background"
+        )
+        assert "#0d1117" in self.content, (
+            "renderGantt must use #0d1117 for alternating row background"
+        )
+
+    def test_render_gantt_groups_spans_by_session_id(self) -> None:
+        assert "session_id" in self.content, (
+            "renderGantt must group spans by session_id"
+        )
+
+    def test_render_gantt_creates_g_elements_with_data_session_id(self) -> None:
+        assert "data-session-id" in self.content, (
+            "renderGantt must create <g data-session-id=...> for each session row"
+        )
+
+    def test_render_gantt_uses_transform_translate(self) -> None:
+        assert "translate" in self.content, (
+            "renderGantt must use transform=translate(...) for row positioning"
+        )
+
+    def test_render_gantt_creates_rect_elements(self) -> None:
+        assert "\"rect\"" in self.content or "'rect'" in self.content, (
+            "renderGantt must create <rect> elements for spans"
+        )
+
+    def test_render_gantt_rect_has_rx3(self) -> None:
+        assert "rx" in self.content and "3" in self.content, (
+            "renderGantt rect must have rx=3 for rounded corners"
+        )
+
+    def test_render_gantt_rect_has_opacity(self) -> None:
+        assert "0.85" in self.content, (
+            "renderGantt rect must have opacity=0.85"
+        )
+
+    def test_render_gantt_rect_uses_span_y_off(self) -> None:
+        assert "SPAN_Y_OFF" in self.content, (
+            "renderGantt rect y-position must use SPAN_Y_OFF constant"
+        )
+
+    def test_render_gantt_rect_uses_span_h(self) -> None:
+        assert "SPAN_H" in self.content, (
+            "renderGantt rect height must use SPAN_H constant"
+        )
+
+    def test_render_gantt_rect_uses_min_bar_w(self) -> None:
+        assert "MIN_BAR_W" in self.content, (
+            "renderGantt rect width must use MIN_BAR_W for minimum bar width"
+        )
+
+    def test_render_gantt_uses_span_color(self) -> None:
+        assert "span.color" in self.content, (
+            "renderGantt rect fill must use span.color"
+        )
+
+    def test_render_gantt_has_fallback_color(self) -> None:
+        assert "'#64748B'" in self.content or '"#64748B"' in self.content, (
+            "renderGantt must have fallback color #64748B when span.color is absent"
+        )
+
+    def test_render_gantt_rect_has_title_tooltip(self) -> None:
+        assert "_spanTooltip" in self.content, (
+            "renderGantt rect must have SVG <title> tooltip via _spanTooltip"
+        )
+        assert "\"title\"" in self.content or "'title'" in self.content, (
+            "renderGantt must create <title> elements for span tooltips"
+        )
+
+    def test_render_gantt_rect_click_calls_select_span(self) -> None:
+        assert "selectSpan" in self.content, (
+            "renderGantt rect click handler must call selectSpan"
+        )
+
+    def test_render_gantt_rect_click_stops_propagation(self) -> None:
+        assert "stopPropagation" in self.content, (
+            "renderGantt rect click handler must call stopPropagation"
+        )
+
+    def test_render_gantt_rect_hover_highlight(self) -> None:
+        assert "mouseenter" in self.content, (
+            "renderGantt rect must have mouseenter listener for opacity highlight"
+        )
+        assert "mouseleave" in self.content, (
+            "renderGantt rect must have mouseleave listener to restore opacity"
+        )
+
+    def test_render_gantt_svg_background_click(self) -> None:
+        assert "_showGap" in self.content, (
+            "renderGantt SVG background click must call _showGap"
+        )
+        assert "clickMs" in self.content, (
+            "renderGantt SVG background click must compute clickMs"
+        )
+
+    def test_render_gantt_calls_render_ruler(self) -> None:
+        assert "_renderRuler" in self.content, (
+            "renderGantt must call _renderRuler after appending rows"
+        )
+
+
+class TestSection5HelperFunctions:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    # --- _flattenSessionOrder ---
+
+    def test_flatten_session_order_defined(self) -> None:
+        assert "function _flattenSessionOrder(" in self.content, (
+            "Must define '_flattenSessionOrder' DFS function"
+        )
+
+    def test_flatten_session_order_is_dfs_push(self) -> None:
+        assert "result.push" in self.content, (
+            "_flattenSessionOrder must push node to result (DFS)"
+        )
+
+    # --- _renderRuler ---
+
+    def test_render_ruler_defined(self) -> None:
+        assert "function _renderRuler(" in self.content, (
+            "Must define '_renderRuler' function"
+        )
+
+    def test_render_ruler_creates_svg_height_28(self) -> None:
+        assert "28" in self.content, (
+            "_renderRuler must create SVG with height 28"
+        )
+
+    def test_render_ruler_has_tick_intervals(self) -> None:
+        # Should pick tick interval based on total duration: 5s/30s/1m/5m
+        # These are all in seconds but used as milliseconds internally
+        assert "5000" in self.content or "30000" in self.content or "60000" in self.content, (
+            "_renderRuler must pick tick interval based on total duration (5s/30s/1m/5m)"
+        )
+
+    def test_render_ruler_renders_line_and_text(self) -> None:
+        assert "\"line\"" in self.content or "'line'" in self.content, (
+            "_renderRuler must render <line> tick marks"
+        )
+        assert "\"text\"" in self.content or "'text'" in self.content, (
+            "_renderRuler must render <text> tick labels"
+        )
+
+    # --- _svgEl ---
+
+    def test_svg_el_helper_defined(self) -> None:
+        assert "function _svgEl(" in self.content, (
+            "Must define '_svgEl' SVG element helper function"
+        )
+
+    def test_svg_el_uses_namespace(self) -> None:
+        assert "http://www.w3.org/2000/svg" in self.content, (
+            "_svgEl must use SVG namespace 'http://www.w3.org/2000/svg'"
+        )
+
+    def test_svg_el_sets_attributes(self) -> None:
+        assert "setAttribute" in self.content, (
+            "_svgEl must set attributes with setAttribute"
+        )
+
+    # --- _formatMs ---
+
+    def test_format_ms_defined(self) -> None:
+        assert "function _formatMs(" in self.content, (
+            "Must define '_formatMs' function"
+        )
+
+    def test_format_ms_returns_ms_format(self) -> None:
+        assert "'ms'" in self.content or "\"ms\"" in self.content or "`ms`" in self.content, (
+            "_formatMs must return 'Nms' format for short durations"
+        )
+
+    def test_format_ms_returns_seconds_format(self) -> None:
+        # Should return 'N.Ns' for durations under 1 minute
+        assert "'s'" in self.content or "\"s\"" in self.content or "`s`" in self.content, (
+            "_formatMs must return 'N.Ns' format for second-scale durations"
+        )
+
+    def test_format_ms_returns_minutes_format(self) -> None:
+        # Should return 'NmSSs' for durations over 1 minute
+        assert "'m'" in self.content or "\"m\"" in self.content or "`m`" in self.content, (
+            "_formatMs must return 'NmSSs' format for minute-scale durations"
+        )
+
+    # --- _spanTooltip ---
+
+    def test_span_tooltip_defined(self) -> None:
+        assert "function _spanTooltip(" in self.content, (
+            "Must define '_spanTooltip' function"
+        )
+
+    def test_span_tooltip_handles_llm_spans(self) -> None:
+        # Should show provider/model, time range, token counts, cost for llm spans
+        assert "provider" in self.content, (
+            "_spanTooltip must reference provider for llm spans"
+        )
+        assert "model" in self.content, (
+            "_spanTooltip must reference model for llm spans"
+        )
+
+    def test_span_tooltip_handles_token_counts(self) -> None:
+        # Should show input_tokens and output_tokens
+        assert "tokens" in self.content, (
+            "_spanTooltip must show token counts"
+        )
+
+    def test_span_tooltip_handles_tool_spans(self) -> None:
+        # Should show tool name and success/failure
+        assert "tool" in self.content, (
+            "_spanTooltip must handle tool spans"
+        )
+
+    def test_span_tooltip_handles_thinking_spans(self) -> None:
+        # Should show 'thinking' type spans
+        assert "thinking" in self.content, (
+            "_spanTooltip must handle thinking spans"
+        )
+
+    # --- _showGap ---
+
+    def test_show_gap_defined(self) -> None:
+        assert "function _showGap(" in self.content, (
+            "Must define '_showGap' function"
+        )
+
+    def test_show_gap_finds_span_before(self) -> None:
+        assert "clickMs" in self.content, (
+            "_showGap must use clickMs to find surrounding spans"
+        )
+
+    def test_show_gap_calls_render_detail_with_gap_type(self) -> None:
+        assert "type:'gap'" in self.content or "type: 'gap'" in self.content or 'type:"gap"' in self.content or 'type: "gap"' in self.content, (
+            "_showGap must call renderDetail with type='gap'"
+        )
+
+    # --- selectSpan updated ---
+
+    def test_select_span_calls_render_detail(self) -> None:
+        # selectSpan stub must be updated to call renderDetail(span)
+        after_fn = self.content.split("function selectSpan(")[1]
+        next_fn = after_fn.split("function ")[0]
+        assert "renderDetail(" in next_fn, (
+            "selectSpan must call renderDetail(span)"
+        )

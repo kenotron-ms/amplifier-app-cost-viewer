@@ -223,7 +223,261 @@ function _scrollGanttToSession(sessionId) {
 // Section 5: Gantt SVG rendering  (added in Task 9)
 // ================================================================
 
-function renderGantt() { /* stub — replaced in Task 9 */ }
+const ROW_HEIGHT = 32;
+const SPAN_H = 20;
+const SPAN_Y_OFF = 6;
+const MIN_BAR_W = 2;
+
+function renderGantt() {
+  const ganttRows = document.getElementById('gantt-rows');
+  const timeRuler = document.getElementById('time-ruler');
+  if (!ganttRows || !timeRuler) return;
+
+  ganttRows.innerHTML = '';
+  timeRuler.innerHTML = '';
+
+  if (!state.spans || state.spans.length === 0) {
+    ganttRows.innerHTML = '<div class="panel-placeholder">No spans to display.</div>';
+    return;
+  }
+
+  // Compute maxEndMs from spans
+  const maxEndMs = state.spans.reduce((m, s) => Math.max(m, s.end_ms || 0), 1);
+
+  // Compute svgWidth: max of panel width and timeline extent
+  const ganttPanel = document.getElementById('gantt-panel');
+  const panelWidth = (ganttPanel ? ganttPanel.clientWidth : 800) - 80;
+  const timelineWidth = maxEndMs / (state.timeScale || 1);
+  const svgWidth = Math.max(panelWidth, timelineWidth);
+
+  // Build sessionOrder via _flattenSessionOrder DFS
+  const sessionOrder = [];
+  if (state.sessionData) {
+    _flattenSessionOrder(state.sessionData, sessionOrder);
+  }
+
+  // Group spans by session_id
+  const spansBySession = {};
+  state.spans.forEach(span => {
+    const sid = span.session_id;
+    if (!spansBySession[sid]) spansBySession[sid] = [];
+    spansBySession[sid].push(span);
+  });
+
+  // Create main SVG element
+  const totalHeight = Math.max(sessionOrder.length * ROW_HEIGHT, ROW_HEIGHT);
+  const svg = _svgEl('svg', {
+    width: svgWidth,
+    height: totalHeight,
+    style: 'display:block',
+  });
+
+  // Alternating row backgrounds (#0d1117 / #161b22)
+  sessionOrder.forEach((node, i) => {
+    const bg = _svgEl('rect', {
+      x: 0,
+      y: i * ROW_HEIGHT,
+      width: svgWidth,
+      height: ROW_HEIGHT,
+      fill: i % 2 === 0 ? '#0d1117' : '#161b22',
+    });
+    svg.appendChild(bg);
+  });
+
+  // SVG background click: compute clickMs and call _showGap
+  svg.addEventListener('click', e => {
+    const svgRect = svg.getBoundingClientRect();
+    const x = e.clientX - svgRect.left;
+    const clickMs = x * (state.timeScale || 1);
+    _showGap(clickMs);
+  });
+
+  // For each session row, create <g data-session-id> with transform translate
+  sessionOrder.forEach((node, i) => {
+    const sid = node.session_id;
+    const g = _svgEl('g', {
+      'data-session-id': sid,
+      transform: `translate(0, ${i * ROW_HEIGHT})`,
+    });
+
+    const spans = spansBySession[sid] || [];
+    spans.forEach(span => {
+      const x = (span.start_ms || 0) / (state.timeScale || 1);
+      const rawW = ((span.end_ms || 0) - (span.start_ms || 0)) / (state.timeScale || 1);
+      const w = Math.max(rawW, MIN_BAR_W);
+      const fill = span.color || '#64748B';
+
+      const rect = _svgEl('rect', {
+        x,
+        y: SPAN_Y_OFF,
+        width: w,
+        height: SPAN_H,
+        rx: 3,
+        fill,
+        opacity: 0.85,
+      });
+
+      // SVG <title> tooltip
+      const titleEl = _svgEl('title', {});
+      titleEl.textContent = _spanTooltip(span);
+      rect.appendChild(titleEl);
+
+      // Click handler: select span, stop propagation to SVG background
+      rect.addEventListener('click', e => {
+        e.stopPropagation();
+        selectSpan(span);
+      });
+
+      // Hover highlight: brighten on enter, restore on leave
+      rect.addEventListener('mouseenter', () => {
+        rect.setAttribute('opacity', '1');
+      });
+      rect.addEventListener('mouseleave', () => {
+        rect.setAttribute('opacity', '0.85');
+      });
+
+      g.appendChild(rect);
+    });
+
+    svg.appendChild(g);
+  });
+
+  ganttRows.appendChild(svg);
+  _renderRuler(timeRuler, maxEndMs, svgWidth);
+}
+
+
+function _flattenSessionOrder(node, result) {
+  result.push(node);
+  if (node.children && node.children.length > 0) {
+    node.children.forEach(child => _flattenSessionOrder(child, result));
+  }
+}
+
+
+function _renderRuler(container, maxEndMs, svgWidth) {
+  const svg = _svgEl('svg', {
+    width: svgWidth,
+    height: 28,
+    style: 'display:block',
+  });
+
+  // Ruler background
+  const bg = _svgEl('rect', {
+    x: 0, y: 0, width: svgWidth, height: 28,
+    fill: '#0d1117',
+  });
+  svg.appendChild(bg);
+
+  // Pick tick interval based on total duration: 5s/30s/1m/5m
+  let tickInterval;
+  if (maxEndMs < 30000) {
+    tickInterval = 5000;      // 5s ticks for short sessions
+  } else if (maxEndMs < 120000) {
+    tickInterval = 30000;     // 30s ticks
+  } else if (maxEndMs < 600000) {
+    tickInterval = 60000;     // 1m ticks
+  } else {
+    tickInterval = 300000;    // 5m ticks for long sessions
+  }
+
+  const timeScale = state.timeScale || 1;
+  for (let t = 0; t <= maxEndMs; t += tickInterval) {
+    const x = t / timeScale;
+
+    // Tick line
+    const line = _svgEl('line', {
+      x1: x, y1: 0, x2: x, y2: 8,
+      stroke: '#30363d',
+      'stroke-width': 1,
+    });
+    svg.appendChild(line);
+
+    // Tick label
+    const text = _svgEl('text', {
+      x,
+      y: 22,
+      fill: '#8b949e',
+      'font-size': 10,
+      'font-family': 'monospace',
+      'text-anchor': 'middle',
+    });
+    text.textContent = _formatMs(t);
+    svg.appendChild(text);
+  }
+
+  container.appendChild(svg);
+}
+
+
+function _svgEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
+  return el;
+}
+
+
+function _formatMs(ms) {
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000).toString().padStart(2, '0');
+  return minutes + 'm' + seconds + 's';
+}
+
+
+function _spanTooltip(span) {
+  const type = span.type || '';
+  const start = _formatMs(span.start_ms || 0);
+  const end = _formatMs(span.end_ms || 0);
+
+  if (type === 'llm') {
+    const lines = [
+      `${span.provider || ''}/${span.model || ''}`,
+      `${start} \u2192 ${end}`,
+    ];
+    if (span.input_tokens != null)  lines.push(`in: ${span.input_tokens} tokens`);
+    if (span.output_tokens != null) lines.push(`out: ${span.output_tokens} tokens`);
+    if (span.cost_usd != null)      lines.push(`$${span.cost_usd.toFixed(6)}`);
+    return lines.join('\n');
+  }
+
+  if (type === 'tool') {
+    const ok = span.success ? '\u2713' : '\u2717';
+    return [
+      `tool: ${span.name || ''}`,
+      `${ok} ${start} \u2192 ${end}`,
+    ].join('\n');
+  }
+
+  if (type === 'thinking') {
+    return `thinking\n${start} \u2192 ${end}`;
+  }
+
+  return `${type}\n${start} \u2192 ${end}`;
+}
+
+
+function _showGap(clickMs) {
+  // Find the span ending just before and starting just after clickMs
+  let before = null;
+  let after = null;
+
+  state.spans.forEach(span => {
+    if ((span.end_ms || 0) <= clickMs) {
+      if (!before || (span.end_ms || 0) > (before.end_ms || 0)) {
+        before = span;
+      }
+    }
+    if ((span.start_ms || 0) >= clickMs) {
+      if (!after || (span.start_ms || 0) < (after.start_ms || 0)) {
+        after = span;
+      }
+    }
+  });
+
+  renderDetail({ type: 'gap', before, after, clickMs });
+}
 
 
 // ================================================================
@@ -231,7 +485,11 @@ function renderGantt() { /* stub — replaced in Task 9 */ }
 // ================================================================
 
 function renderDetail() { /* stub — replaced in Task 10 */ }
-function selectSpan()   { /* stub — replaced in Task 10 */ }
+
+function selectSpan(span) {
+  state.selectedSpan = span;
+  renderDetail(span);
+}
 
 
 // ================================================================
