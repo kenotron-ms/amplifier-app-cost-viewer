@@ -287,31 +287,174 @@ def parse_spans(
 
 
 # ---------------------------------------------------------------------------
-# Stub functions — implemented in Task 12
+# Session tree pipeline
 # ---------------------------------------------------------------------------
 
 
-def discover_sessions(amp_home: Path) -> dict[str, "SessionNode"]:
-    """Discover all sessions under amp_home/projects/*/sessions/.
+def discover_sessions(amplifier_home: Path) -> dict[str, SessionNode]:
+    """Discover all sessions under amplifier_home/projects/*/sessions/.
 
-    Returns a flat dict mapping session_id → SessionNode.
+    Scans amplifier_home/projects/*/sessions/*/metadata.json.  For each
+    session directory that has both metadata.json and events.jsonl, parses
+    the metadata and computes duration from the event log.
+
+    Returns:
+        A flat dict mapping session_id → SessionNode.  Returns {} when
+        the projects directory does not exist or no valid sessions are found.
     """
-    raise NotImplementedError
+    sessions: dict[str, SessionNode] = {}
+
+    projects_dir = amplifier_home / "projects"
+    if not projects_dir.exists():
+        return sessions
+
+    for session_dir in projects_dir.glob("*/sessions/*/"):
+        metadata_path = session_dir / "metadata.json"
+        events_path = session_dir / "events.jsonl"
+
+        if not metadata_path.exists() or not events_path.exists():
+            continue
+
+        try:
+            metadata = json.loads(metadata_path.read_text())
+            session_id = metadata["session_id"]
+            parent_id = metadata.get("parent_id")  # None or str
+            project_slug = metadata["project_slug"]
+            created = metadata["created"]
+
+            # Compute duration_ms using normalize_timestamps and _read_events
+            events = _read_events(events_path)
+            duration_ms = 0
+            end_ts: str | None = None
+
+            try:
+                start_ms = normalize_timestamps(events_path)
+                for event in events:
+                    if event.get("event") == "session:end":
+                        end_ts = event.get("ts")
+                        break
+                if end_ts is not None:
+                    duration_ms = _ts_to_ms(end_ts) - start_ms
+            except ValueError:
+                pass  # No session:start event — leave duration_ms = 0
+
+            node = SessionNode(
+                session_id=session_id,
+                project_slug=project_slug,
+                parent_id=parent_id,
+                start_ts=created,
+                end_ts=end_ts,
+                duration_ms=duration_ms,
+                cost_usd=0.0,
+                total_cost_usd=0.0,
+                spans=[],
+                children=[],
+                events_path=events_path,
+            )
+            sessions[session_id] = node
+
+        except (KeyError, json.JSONDecodeError, OSError):
+            continue
+
+    return sessions
 
 
-def build_tree(sessions: dict[str, "SessionNode"]) -> list["SessionNode"]:
-    """Arrange flat sessions dict into a forest (list of root SessionNodes)."""
-    raise NotImplementedError
+def build_tree(sessions: dict[str, SessionNode]) -> list[SessionNode]:
+    """Arrange flat sessions dict into a forest (list of root SessionNodes).
+
+    Links each node to its parent's children list when the parent is present
+    in the sessions dict.
+
+    Returns:
+        List of root nodes — those whose parent_id is None or points to a
+        session not in the dict.
+    """
+    for node in sessions.values():
+        if node.parent_id is not None and node.parent_id in sessions:
+            sessions[node.parent_id].children.append(node)
+
+    return [
+        node
+        for node in sessions.values()
+        if node.parent_id is None or node.parent_id not in sessions
+    ]
 
 
-def aggregate_costs(node: "SessionNode") -> None:
-    """Recursively set total_cost_usd = cost_usd + sum of children totals."""
-    raise NotImplementedError
+def aggregate_costs(node: SessionNode) -> None:
+    """Recursively set total_cost_usd = cost_usd + sum of children totals.
+
+    Processes children depth-first so each child's total_cost_usd is correct
+    before being summed into the parent.
+    """
+    for child in node.children:
+        aggregate_costs(child)
+    node.total_cost_usd = node.cost_usd + sum(
+        child.total_cost_usd for child in node.children
+    )
 
 
-def build_session_tree(amp_home: Path) -> list["SessionNode"]:
+def _parse_all_spans(node: SessionNode, root_start_ms: int) -> None:
+    """Recursively parse spans for node and all descendants.
+
+    For each node with an events_path, calls normalize_timestamps to get the
+    session's own start time, then parse_spans to build the span list.
+    Sets node.cost_usd to the sum of all span costs.
+
+    Args:
+        node: The session node to process (and recurse into).
+        root_start_ms: Unix ms of the root session's start, used as the
+            time origin for all offset calculations.
+    """
+    if node.events_path is not None:
+        try:
+            session_start_ms = normalize_timestamps(node.events_path)
+            node.spans = parse_spans(node.events_path, root_start_ms, session_start_ms)
+            node.cost_usd = sum(span.cost_usd for span in node.spans)
+        except (ValueError, OSError):
+            pass  # Skip span parsing for sessions with no start event
+
+    for child in node.children:
+        _parse_all_spans(child, root_start_ms)
+
+
+def build_session_tree(amplifier_home: Path) -> list[SessionNode]:
     """Discover sessions, build tree, parse spans, aggregate costs.
 
-    Returns root SessionNodes sorted most-recent first.
+    Five-stage pipeline:
+      1. discover  — scan event logs and metadata files
+      2. build_tree — link children to parents, identify roots
+      3. parse spans — for each root subtree, extract and cost all spans
+      4. aggregate costs — roll up total_cost_usd bottom-up per tree
+      5. sort — most-recent root first (by start_ts descending)
+
+    Returns:
+        Root SessionNodes sorted most-recent first.  Returns [] when no
+        sessions are found.
     """
-    raise NotImplementedError
+    # Stage 1: Discover
+    sessions = discover_sessions(amplifier_home)
+    if not sessions:
+        return []
+
+    # Stage 2: Build tree
+    roots = build_tree(sessions)
+
+    # Stage 3: Parse spans (per root subtree)
+    for root in roots:
+        if root.events_path is not None:
+            try:
+                root_start_ms = normalize_timestamps(root.events_path)
+            except (ValueError, OSError):
+                root_start_ms = 0
+        else:
+            root_start_ms = 0
+        _parse_all_spans(root, root_start_ms)
+
+    # Stage 4: Aggregate costs (per root)
+    for root in roots:
+        aggregate_costs(root)
+
+    # Stage 5: Sort roots most-recent first
+    roots.sort(key=lambda n: _ts_to_ms(n.start_ts), reverse=True)
+
+    return roots
