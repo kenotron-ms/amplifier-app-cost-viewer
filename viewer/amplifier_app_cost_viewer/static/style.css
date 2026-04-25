@@ -286,11 +286,29 @@ body {
   background-color: var(--surface);
   border-top: 1px solid var(--border);
   height: var(--detail-height);
-  min-height: var(--detail-height);
+  min-height: 80px;
+  max-height: 60vh;
   flex-shrink: 0;
   overflow-y: auto;
   padding: 10px 14px;
   transition: transform 0.2s ease, opacity 0.2s ease;
+  position: relative;
+  resize: none;  /* handled manually via drag handle */
+}
+
+.detail-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  background: transparent;
+  z-index: 10;
+}
+
+.detail-resize-handle:hover {
+  background: rgba(88, 166, 255, 0.3);  /* subtle blue on hover */
 }
 
 /* Hidden by default — slides up when shown */

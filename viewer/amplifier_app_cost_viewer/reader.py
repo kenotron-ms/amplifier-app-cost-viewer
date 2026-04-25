@@ -355,7 +355,7 @@ def discover_sessions(amplifier_home: Path) -> dict[str, SessionNode]:
             continue  # Need at least events.jsonl
 
         if metadata_path.exists():
-            # Full session: read metadata
+            # Full session: read metadata only — no event parsing (fast path)
             try:
                 metadata = json.loads(metadata_path.read_text())
                 session_id = metadata.get("session_id") or session_dir.name
@@ -371,29 +371,14 @@ def discover_sessions(amplifier_home: Path) -> dict[str, SessionNode]:
                 created = metadata.get("created", "")
                 name = metadata.get("name")  # may be None
 
-                # Compute duration_ms using normalize_timestamps and _read_events
-                events = _read_events(events_path)
-                duration_ms = 0
-                end_ts: str | None = None
-
-                try:
-                    start_ms = normalize_timestamps(events_path)
-                    for event in events:
-                        if event.get("event") == "session:end":
-                            end_ts = event.get("ts")
-                            break
-                    if end_ts is not None:
-                        duration_ms = _ts_to_ms(end_ts) - start_ms
-                except ValueError:
-                    pass  # No session:start event — leave duration_ms = 0
-
+                # Duration and cost are 0.0 until spans are loaded lazily
                 node = SessionNode(
                     session_id=session_id,
                     project_slug=project_slug,
                     parent_id=parent_id,
                     start_ts=created,
-                    end_ts=end_ts,
-                    duration_ms=duration_ms,
+                    end_ts=None,
+                    duration_ms=0,
                     cost_usd=0.0,
                     total_cost_usd=0.0,
                     spans=[],
@@ -491,20 +476,22 @@ def _parse_all_spans(node: SessionNode, root_start_ms: int) -> None:
 
 
 def build_session_tree(amplifier_home: Path) -> list[SessionNode]:
-    """Discover sessions, build tree, parse spans, aggregate costs.
+    """Discover sessions, build tree, and aggregate costs (metadata only).
 
-    Five-stage pipeline:
-      1. discover  — scan event logs and metadata files
+    Three-stage pipeline (spans loaded lazily on demand, not here):
+      1. discover  — scan metadata files only (fast)
       2. build_tree — link children to parents, identify roots
-      3. parse spans — for each root subtree, extract and cost all spans
-      4. aggregate costs — roll up total_cost_usd bottom-up per tree
-      5. sort — most-recent root first (by start_ts descending)
+      3. aggregate costs — roll up total_cost_usd bottom-up per tree
+      4. sort — most-recent root first (by start_ts descending)
+
+    NOTE: Spans are NOT loaded here.  Call parse_spans() per-session when
+    a specific session is requested (see server._load_session).
 
     Returns:
         Root SessionNodes sorted most-recent first.  Returns [] when no
         sessions are found.
     """
-    # Stage 1: Discover
+    # Stage 1: Discover (metadata only — no event file reading)
     sessions = discover_sessions(amplifier_home)
     if not sessions:
         return []
@@ -512,22 +499,13 @@ def build_session_tree(amplifier_home: Path) -> list[SessionNode]:
     # Stage 2: Build tree
     roots = build_tree(sessions)
 
-    # Stage 3: Parse spans (per root subtree)
-    for root in roots:
-        if root.events_path is not None:
-            try:
-                root_start_ms = normalize_timestamps(root.events_path)
-            except (ValueError, OSError):
-                root_start_ms = 0
-        else:
-            root_start_ms = 0
-        _parse_all_spans(root, root_start_ms)
-
-    # Stage 4: Aggregate costs (per root)
+    # Stage 3: Aggregate costs (all zero until spans are loaded lazily)
     for root in roots:
         aggregate_costs(root)
 
-    # Stage 5: Sort roots most-recent first (stub nodes with empty start_ts sort last)
-    roots.sort(key=lambda n: _ts_to_ms(n.start_ts) if n.start_ts else 0, reverse=True)
-
-    return roots
+    # Stage 4: Sort roots most-recent first (stub nodes with empty start_ts sort last)
+    return sorted(
+        roots,
+        key=lambda n: n.start_ts or "",
+        reverse=True,
+    )

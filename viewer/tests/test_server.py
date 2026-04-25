@@ -34,16 +34,18 @@ CHILD2_SESSION_ID = "child2-55667788"
 
 @pytest.fixture
 def client(amp_home: Path, monkeypatch) -> TestClient:
-    """TestClient with AMPLIFIER_HOME patched to amp_home and _roots_cache cleared.
+    """TestClient with AMPLIFIER_HOME patched to amp_home and caches cleared.
 
-    Clears _roots_cache before and after each test to prevent cross-test
-    contamination from the in-memory session tree cache.
+    Clears _roots_cache and _loaded_cache before and after each test to
+    prevent cross-test contamination from the in-memory session tree cache.
     """
     monkeypatch.setattr(_server, "AMPLIFIER_HOME", amp_home)
     _server._roots_cache = None  # clear before test
+    _server._loaded_cache = {}  # clear before test
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
     _server._roots_cache = None  # clear after test
+    _server._loaded_cache = {}  # clear after test
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +103,14 @@ class TestListSessions:
         assert sessions[ROOT_SESSION_ID]["child_count"] == 2
 
     def test_total_cost_greater_than_own_cost(self, client: TestClient) -> None:
-        """total_cost_usd includes children costs so it exceeds the root's own cost_usd."""
+        """total_cost_usd includes children costs so it exceeds the root's own cost_usd.
+
+        Spans are lazy-loaded, so we must first fetch the session detail to
+        trigger span loading, then re-check the list for aggregated costs.
+        """
+        # Trigger lazy loading for the root (also loads child spans)
+        client.get(f"/api/sessions/{ROOT_SESSION_ID}")
+        # Now the session list will reflect the loaded costs
         data = client.get("/api/sessions").json()
         sessions = {s["session_id"]: s for s in data["sessions"]}
         entry = sessions[ROOT_SESSION_ID]
@@ -382,3 +391,69 @@ class TestListSessionsPagination:
         data = resp.json()
         assert data["total"] >= 1
         assert len(data["sessions"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# TestLazySpanLoading — spans must NOT load on session list  (2 tests)
+# ---------------------------------------------------------------------------
+
+
+def test_sessions_list_does_not_load_spans(
+    client: TestClient, amp_home: Path, monkeypatch
+) -> None:
+    """GET /api/sessions must NOT trigger parse_spans for any session."""
+    import amplifier_app_cost_viewer.reader as reader_mod
+
+    calls: list = []
+    original = reader_mod.parse_spans
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(reader_mod, "parse_spans", spy)
+
+    # Clear cache so scan runs fresh
+    import amplifier_app_cost_viewer.server as server_mod
+
+    server_mod._roots_cache = None
+    resp = client.get("/api/sessions")
+    assert resp.status_code == 200
+    assert len(calls) == 0, (
+        f"parse_spans called {len(calls)} times during session list — "
+        "span loading must be lazy (only triggered by /api/sessions/{id})"
+    )
+
+
+def test_spans_loaded_on_session_detail(
+    client: TestClient, amp_home: Path, monkeypatch
+) -> None:
+    """GET /api/sessions/{id}/spans triggers parse_spans (lazy load)."""
+    import amplifier_app_cost_viewer.reader as reader_mod
+
+    calls: list = []
+    original = reader_mod.parse_spans
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(reader_mod, "parse_spans", spy)
+
+    import amplifier_app_cost_viewer.server as server_mod
+
+    server_mod._roots_cache = None
+    # _loaded_cache may not exist yet (pre-fix); setattr works on modules
+    server_mod._loaded_cache = {}
+
+    sessions = client.get("/api/sessions").json()["sessions"]
+    # Clear any calls that happened during the session LIST (should be 0 post-fix,
+    # but reset here so we only assert calls triggered by the spans endpoint)
+    calls.clear()
+
+    sid = sessions[0]["session_id"]
+    client.get(f"/api/sessions/{sid}/spans")
+    assert len(calls) > 0, (
+        "parse_spans should be called when fetching /api/sessions/{id}/spans "
+        "(lazy span loading is not working)"
+    )

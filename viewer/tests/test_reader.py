@@ -314,6 +314,7 @@ from amplifier_app_cost_viewer.reader import (  # noqa: E402
     build_tree,
     discover_sessions,
 )
+from amplifier_app_cost_viewer.reader import _parse_all_spans  # noqa: E402  (private, test-only)
 
 
 # ---------------------------------------------------------------------------
@@ -490,24 +491,51 @@ class TestBuildSessionTree:
         root_with_children = next(r for r in roots if len(r.children) == 2)
         assert len(root_with_children.children) == 2
 
-    def test_root_spans_parsed(self, amp_home: Path):
-        """Each root session node has exactly 1 LLM span after build_session_tree."""
+    def test_root_spans_empty_before_load(self, amp_home: Path):
+        """build_session_tree is metadata-only — spans are empty until lazy-loaded."""
         roots = build_session_tree(amp_home)
         for root in roots:
+            assert root.spans == [], (
+                f"{root.session_id} should have empty spans after build_session_tree "
+                "(spans are loaded lazily on demand)"
+            )
+
+    def test_root_spans_parsed_after_explicit_load(self, amp_home: Path):
+        """Each root session node has exactly 1 LLM span after explicit span loading."""
+        roots = build_session_tree(amp_home)
+        for root in roots:
+            # Load spans explicitly (simulating lazy loading)
+            assert root.events_path is not None, (
+                f"{root.session_id} must have events_path"
+            )
+            root_start_ms = normalize_timestamps(root.events_path)
+            _parse_all_spans(root, root_start_ms)
             llm_spans = [s for s in root.spans if s.type == "llm"]
             assert len(llm_spans) == 1, f"{root.session_id} should have 1 LLM span"
 
     def test_own_cost_nonzero(self, amp_home: Path):
-        """Each root node cost_usd (own cost) is > 0 after parsing spans."""
+        """Each root node cost_usd (own cost) is > 0 after explicit span loading."""
         roots = build_session_tree(amp_home)
         for root in roots:
+            assert root.events_path is not None, (
+                f"{root.session_id} must have events_path"
+            )
+            root_start_ms = normalize_timestamps(root.events_path)
+            _parse_all_spans(root, root_start_ms)
             assert root.cost_usd > 0, f"{root.session_id} should have non-zero cost"
 
     def test_total_cost_aggregated(self, amp_home: Path):
-        """root-aabbccdd total_cost_usd == 3 sessions × $0.003456 = $0.010368."""
+        """root-aabbccdd total_cost_usd == 3 sessions × $0.003456 = $0.010368.
+
+        Requires explicit span loading (lazy) followed by aggregate_costs.
+        """
         roots = build_session_tree(amp_home)
         # Find the root with children (root-aabbccdd has 2 children, root2 has none)
         root_with_children = next(r for r in roots if len(r.children) == 2)
+        assert root_with_children.events_path is not None
+        root_start_ms = normalize_timestamps(root_with_children.events_path)
+        _parse_all_spans(root_with_children, root_start_ms)
+        aggregate_costs(root_with_children)
         expected = 3 * 0.003456  # = 0.010368
         assert abs(root_with_children.total_cost_usd - expected) < 1e-6
 

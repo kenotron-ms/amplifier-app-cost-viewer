@@ -530,20 +530,30 @@ function selectSpan(span) {
 function renderDetail(span) {
   const panel = document.getElementById('detail-panel');
   panel.classList.remove('hidden');
-  panel.innerHTML = '';
 
-  if (!span) return;
+  // Build content HTML for this span type
+  let contentHtml = '';
+  if (!span) {
+    panel.innerHTML = '<div class="detail-resize-handle" id="detail-resize-handle"></div>';
+    initDetailResize();
+    return;
+  }
 
+  // Render into a temporary container to get the HTML string
+  const tmp = document.createElement('div');
   const type = span.type || '';
   if (type === 'llm') {
-    _detailLlm(panel, span);
+    _detailLlm(tmp, span);
   } else if (type === 'tool') {
-    _detailTool(panel, span);
+    _detailTool(tmp, span);
   } else if (type === 'thinking') {
-    _detailThinking(panel, span);
+    _detailThinking(tmp, span);
   } else if (type === 'gap') {
-    _detailGap(panel, span);
+    _detailGap(tmp, span);
   }
+
+  // Prepend the resize handle to the panel content
+  panel.innerHTML = '<div class="detail-resize-handle" id="detail-resize-handle"></div>' + tmp.innerHTML;
 
   // Wire .detail-show-more buttons: click replaces content with data-fullText, removes button
   panel.querySelectorAll('.detail-show-more').forEach(btn => {
@@ -559,6 +569,9 @@ function renderDetail(span) {
   if (closeBtn) {
     closeBtn.addEventListener('click', _closeDetail);
   }
+
+  // Re-attach resize handle listener (re-created with innerHTML)
+  initDetailResize();
 }
 
 
@@ -686,6 +699,35 @@ function _closeDetail() {
 }
 
 
+function initDetailResize() {
+  const handle = document.getElementById('detail-resize-handle');
+  const panel = document.getElementById('detail-panel');
+  if (!handle || !panel) return;
+
+  let startY = 0, startH = 0;
+
+  handle.addEventListener('mousedown', e => {
+    startY = e.clientY;
+    startH = panel.offsetHeight;
+
+    const onMove = ev => {
+      const delta = startY - ev.clientY;  // drag up = bigger panel
+      const newH = Math.max(80, Math.min(window.innerHeight * 0.6, startH + delta));
+      panel.style.height = newH + 'px';
+    };
+
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  });
+}
+
+
 function _esc(s) {
   return String(s)
     .replace(/&/g, '&amp;')
@@ -733,6 +775,7 @@ async function init() {
   }
 
   renderToolbar();
+  initDetailResize();  // attach resize handle if panel is already visible
 
   if (state.sessions.length > 0) {
     try {

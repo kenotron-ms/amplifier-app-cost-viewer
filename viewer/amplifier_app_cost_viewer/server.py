@@ -10,7 +10,13 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from amplifier_app_cost_viewer.reader import SessionNode, Span, build_session_tree
+import amplifier_app_cost_viewer.reader as _reader
+from amplifier_app_cost_viewer.reader import (
+    SessionNode,
+    Span,
+    aggregate_costs,
+    build_session_tree,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -21,10 +27,11 @@ AMPLIFIER_HOME: Path = Path(
 )
 
 # ---------------------------------------------------------------------------
-# In-memory cache
+# In-memory caches
 # ---------------------------------------------------------------------------
 
 _roots_cache: list[SessionNode] | None = None
+_loaded_cache: dict[str, SessionNode] = {}  # session_id → fully loaded root node
 
 # ---------------------------------------------------------------------------
 # FastAPI application
@@ -134,6 +141,53 @@ def _find_root(session_id: str) -> SessionNode | None:
     return None
 
 
+def _parse_all_spans_for_node(node: SessionNode, root_start_ms: int) -> None:
+    """Recursively load spans for node and all descendants.
+
+    Uses _reader.parse_spans / _reader.normalize_timestamps via module access
+    so that test monkeypatching of reader_mod.parse_spans is respected.
+    """
+    if node.events_path and node.events_path.exists():
+        try:
+            session_start_ms = _reader.normalize_timestamps(node.events_path)
+            node.spans = _reader.parse_spans(
+                node.events_path, root_start_ms, session_start_ms
+            )
+            node.cost_usd = sum(s.cost_usd for s in node.spans)
+        except (ValueError, OSError):
+            pass
+    for child in node.children:
+        _parse_all_spans_for_node(child, root_start_ms)
+    aggregate_costs(node)
+
+
+def _load_session(session_id: str) -> SessionNode | None:
+    """Return a fully span-loaded root node, using the cache where possible.
+
+    1. Finds the root node for session_id.
+    2. Returns cached loaded node if already in _loaded_cache.
+    3. Otherwise calls parse_spans for the root and all descendants,
+       stores the result in _loaded_cache, and returns it.
+    """
+    global _loaded_cache
+    root = _find_root(session_id)
+    if root is None:
+        return None
+    if root.session_id in _loaded_cache:
+        return _loaded_cache[root.session_id]
+    # Compute root_start_ms from the root's events file
+    if root.events_path and root.events_path.exists():
+        try:
+            root_start_ms = _reader.normalize_timestamps(root.events_path)
+        except (ValueError, OSError):
+            root_start_ms = 0
+    else:
+        root_start_ms = 0
+    _parse_all_spans_for_node(root, root_start_ms)
+    _loaded_cache[root.session_id] = root
+    return root
+
+
 # ---------------------------------------------------------------------------
 # API routes
 # ---------------------------------------------------------------------------
@@ -164,7 +218,7 @@ def list_sessions(
 @app.get("/api/sessions/{session_id}")
 def get_session(session_id: str) -> dict:
     """Return the full session tree for session_id, including spans and children."""
-    root = _find_root(session_id)
+    root = _load_session(session_id)
     if root is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return _node_to_dict(root, include_spans=True)
@@ -173,7 +227,7 @@ def get_session(session_id: str) -> dict:
 @app.get("/api/sessions/{session_id}/spans")
 def get_session_spans(session_id: str) -> list[dict]:
     """Return flattened spans from session_id and all descendants, with depth."""
-    root = _find_root(session_id)
+    root = _load_session(session_id)
     if root is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return _flatten_spans(root, depth=0)
