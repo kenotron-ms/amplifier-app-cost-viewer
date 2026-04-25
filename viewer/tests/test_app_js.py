@@ -379,3 +379,20 @@ class TestSection7Init:
             "init() must wrap loadSession() in try/catch and log the error "
             "(e.g., console.error('Failed to load session:', err))"
         )
+
+    def test_session_select_change_listener_has_catch_handler(self) -> None:
+        # The session-select change listener calls loadSession (async); without .catch()
+        # any rejection becomes an unhandled promise rejection with no user feedback.
+        assert "Failed to switch session" in self.content, (
+            "session-select change listener must add .catch() to loadSession() "
+            "and display user-visible feedback (e.g., 'Failed to switch session')"
+        )
+
+    def test_refresh_handler_does_not_pre_clear_sessions(self) -> None:
+        # Refresh handler must NOT wipe state.sessions before the fetch succeeds.
+        # fetchSessions() updates state.sessions on success; pre-clearing corrupts state
+        # when the network call fails (DOM still shows old sessions, state is empty).
+        assert "state.sessions = []" not in self.content, (
+            "Refresh handler must not pre-clear state.sessions before fetchSessions() "
+            "succeeds — mutate state only after the network call completes successfully"
+        )

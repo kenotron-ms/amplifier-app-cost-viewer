@@ -83,14 +83,17 @@ function renderToolbar() {
   `;
 
   document.getElementById('session-select').addEventListener('change', e => {
-    loadSession(e.target.value);
+    loadSession(e.target.value).catch(err => {
+      console.error('Failed to switch session:', err);
+      document.getElementById('tree-panel').innerHTML =
+        `<div class="panel-placeholder" style="color:#f85149">Error: ${err.message}</div>`;
+    });
   });
 
   document.getElementById('refresh-btn').addEventListener('click', async () => {
     try {
-      state.sessions = [];
-      state.activeSessionId = null;
       await fetchSessions();
+      state.activeSessionId = null;
       if (state.sessions.length > 0) {
         await loadSession(state.sessions[0].session_id);
       } else {
