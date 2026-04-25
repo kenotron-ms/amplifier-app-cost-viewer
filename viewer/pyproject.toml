@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "amplifier-app-cost-viewer"
 version = "0.1.0"
-description = "Amplifier session cost and performance viewer"
+description = "Amplifier App Cost Viewer — session cost and performance"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

@@ -1,10 +1,10 @@
-"""Integration tests for server.py API routes — written FIRST before server.py exists (TDD RED).
+"""Integration tests for server.py API routes — 22 tests, all GREEN.
 
-These tests import amplifier_app_cost_viewer.server which does not yet exist.
-Running this file will fail with:
-    ModuleNotFoundError: No module named 'amplifier_app_cost_viewer.server'
-
-That is the expected RED state.  server.py will be implemented in the next task.
+Tests cover the 4 FastAPI routes exposed by the Amplifier Cost Viewer backend:
+  - GET /               → redirect to /static/index.html
+  - GET /api/sessions   → list all root sessions with cost summary
+  - GET /api/sessions/{id}       → full session tree
+  - GET /api/sessions/{id}/spans → flattened spans with depth
 """
 
 from __future__ import annotations
@@ -101,7 +101,7 @@ class TestListSessions:
 
 
 # ---------------------------------------------------------------------------
-# TestGetSession — GET /api/sessions/{session_id}  (6 tests)
+# TestGetSession — GET /api/sessions/{session_id}  (7 tests)
 # ---------------------------------------------------------------------------
 
 
@@ -148,6 +148,13 @@ class TestGetSession:
             assert span["color"].startswith("#")
             assert len(span["color"]) == 7
 
+
+
+    def test_response_includes_correct_session_id(self, client: TestClient) -> None:
+        """Response body 'session_id' matches the requested session_id."""
+        response = client.get(f"/api/sessions/{ROOT_SESSION_ID}")
+        body = response.json()
+        assert body.get("session_id") == ROOT_SESSION_ID
 
 # ---------------------------------------------------------------------------
 # TestGetSessionSpans — GET /api/sessions/{session_id}/spans  (7 tests)

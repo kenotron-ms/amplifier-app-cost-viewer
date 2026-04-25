@@ -1,4 +1,4 @@
-"""FastAPI backend for the Amplifier Cost Viewer."""
+"""FastAPI backend for the Amplifier App Cost Viewer — 4 routes with in-memory cache."""
 
 from __future__ import annotations
 
