@@ -9,6 +9,7 @@ Tests cover the 4 FastAPI routes exposed by the Amplifier Cost Viewer backend:
 
 from __future__ import annotations
 
+import json as _json
 from pathlib import Path
 
 import pytest
@@ -123,7 +124,9 @@ class TestGetSession:
         assert "spans" in body
         assert isinstance(body["spans"], list)
 
-    def test_response_has_children_list_with_two_items(self, client: TestClient) -> None:
+    def test_response_has_children_list_with_two_items(
+        self, client: TestClient
+    ) -> None:
         """Response body includes a 'children' key with exactly 2 child sessions."""
         response = client.get(f"/api/sessions/{ROOT_SESSION_ID}")
         body = response.json()
@@ -148,13 +151,12 @@ class TestGetSession:
             assert span["color"].startswith("#")
             assert len(span["color"]) == 7
 
-
-
     def test_response_includes_correct_session_id(self, client: TestClient) -> None:
         """Response body 'session_id' matches the requested session_id."""
         response = client.get(f"/api/sessions/{ROOT_SESSION_ID}")
         body = response.json()
         assert body.get("session_id") == ROOT_SESSION_ID
+
 
 # ---------------------------------------------------------------------------
 # TestGetSessionSpans — GET /api/sessions/{session_id}/spans  (7 tests)
@@ -177,7 +179,9 @@ class TestGetSessionSpans:
         response = client.get(f"/api/sessions/{ROOT_SESSION_ID}/spans")
         assert isinstance(response.json(), list)
 
-    def test_returns_spans_from_all_three_sessions_count_3(self, client: TestClient) -> None:
+    def test_returns_spans_from_all_three_sessions_count_3(
+        self, client: TestClient
+    ) -> None:
         """Flat span list collects one span from each of the 3 sessions (root + 2 children)."""
         response = client.get(f"/api/sessions/{ROOT_SESSION_ID}/spans")
         spans = response.json()
@@ -226,3 +230,88 @@ class TestRootRoute:
         """GET / redirects to the static file root with a 3xx status code."""
         response = client.get("/", follow_redirects=False)
         assert response.status_code in {301, 302, 307, 308}
+
+
+# ---------------------------------------------------------------------------
+# TestSessionFilter — /api/sessions only returns true root sessions  (2 tests)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def amp_home_with_orphan(tmp_path: Path) -> Path:
+    """Create a fake ~/.amplifier with only an orphaned session.
+
+    The orphaned session has parent_id set to a UUID that does NOT exist on
+    disk — this is the Amplifier-format pattern where child sessions reference
+    a root session that isn't stored locally.
+
+    With the current (unfixed) build_tree, orphaned sessions are incorrectly
+    treated as roots and appear in the dropdown.  After the fix, they must not.
+    """
+    base = tmp_path / ".amplifier"
+    sessions_dir = base / "projects" / "test-project" / "sessions"
+    sessions_dir.mkdir(parents=True)
+
+    orphan_id = "0000000000000000-deadbeef_superpowers-implementer"
+    session_dir = sessions_dir / orphan_id
+    session_dir.mkdir()
+
+    (session_dir / "metadata.json").write_text(
+        _json.dumps(
+            {
+                "session_id": orphan_id,
+                "parent_id": "a860b568-034d-4edf-8c90-ab4be8843a47",  # not on disk
+                "project_slug": "test-project",
+                "created": "2026-04-25T10:00:00.000+00:00",
+            }
+        )
+    )
+    # Minimal events file so the session is picked up by discover_sessions
+    (session_dir / "events.jsonl").write_text(
+        _json.dumps(
+            {
+                "event": "session:start",
+                "ts": "2026-04-25T10:00:00.000+00:00",
+                "data": {},
+            }
+        )
+        + "\n"
+    )
+
+    return base
+
+
+class TestSessionFilter:
+    """Orphaned sessions (parent_id set but parent not on disk) must not appear
+    in GET /api/sessions — only true root sessions (parent_id is None) are listed.
+    """
+
+    def test_orphaned_session_excluded_from_list(
+        self, amp_home_with_orphan: Path, monkeypatch
+    ) -> None:
+        """Sessions with a parent_id set must not appear in /api/sessions even
+        when their parent session does not exist on disk.
+        """
+        monkeypatch.setattr(_server, "AMPLIFIER_HOME", amp_home_with_orphan)
+        _server._roots_cache = None
+        try:
+            with TestClient(app, raise_server_exceptions=True) as c:
+                response = c.get("/api/sessions")
+            assert response.status_code == 200
+            sessions = response.json()
+            assert sessions == [], (
+                "Orphaned session (parent_id set, parent not on disk) must not "
+                f"appear in /api/sessions; got {sessions}"
+            )
+        finally:
+            _server._roots_cache = None
+
+    def test_true_root_session_appears_in_list(self, client: TestClient) -> None:
+        """A session with parent_id=None (true root) must appear in /api/sessions."""
+        response = client.get("/api/sessions")
+        assert response.status_code == 200
+        sessions = response.json()
+        ids = [s["session_id"] for s in sessions]
+        assert ROOT_SESSION_ID in ids, (
+            f"True root session {ROOT_SESSION_ID!r} must appear in list; got {ids}"
+        )

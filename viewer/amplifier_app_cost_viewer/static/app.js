@@ -69,7 +69,7 @@ function renderToolbar() {
   const costStr = `$${totalCost.toFixed(4)}`;
 
   toolbar.innerHTML = `
-    <span class="toolbar-title">Cost Viewer</span>
+    <span class="toolbar-title">Amplifier Cost Viewer</span>
     <select id="session-select" aria-label="Select session">
       ${state.sessions.map(s => `
         <option value="${s.session_id}"

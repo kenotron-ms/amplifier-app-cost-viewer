@@ -140,9 +140,19 @@ def _find_root(session_id: str) -> SessionNode | None:
 
 @app.get("/api/sessions")
 def list_sessions() -> list[dict]:
-    """Return all root sessions as a summary list (no spans)."""
+    """Return true root sessions (parent_id is None) as a summary list (no spans).
+
+    Only sessions with no parent are shown.  Sessions whose parent_id is set
+    but whose parent does not exist on disk are intentionally excluded — these
+    are Amplifier child sessions (e.g. delegated sub-agents) whose root context
+    is not stored locally and would show as empty/misleading entries.
+    """
     roots = _get_roots()
-    return [_node_to_dict(root, include_spans=False) for root in roots]
+    return [
+        _node_to_dict(root, include_spans=False)
+        for root in roots
+        if root.parent_id is None
+    ]
 
 
 @app.get("/api/sessions/{session_id}")
