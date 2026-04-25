@@ -643,3 +643,66 @@ class TestDiscoverSessionsRealMetadataFormat:
         sessions = discover_sessions(amp_home)
         assert session_id in sessions
         assert sessions[session_id].project_slug == project
+
+
+# ---------------------------------------------------------------------------
+# TestEventsOnlyStubSessions (task-fix TDD RED)
+# ---------------------------------------------------------------------------
+
+
+def test_events_only_session_becomes_stub(tmp_path):
+    """Sessions with events.jsonl but no metadata.json become stub nodes."""
+    amp_home = tmp_path / ".amplifier"
+    # Create parent session (events only, no metadata)
+    parent_dir = amp_home / "projects" / "test-proj" / "sessions" / "parent-uuid-123"
+    parent_dir.mkdir(parents=True)
+    (parent_dir / "events.jsonl").write_text(
+        '{"ts":"2026-01-01T00:00:00Z","event":"session:start","session_id":"parent-uuid-123"}\n'
+    )
+    # Create child session WITH metadata pointing to parent
+    child_dir = amp_home / "projects" / "test-proj" / "sessions" / "child-abc"
+    child_dir.mkdir(parents=True)
+    (child_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "session_id": "child-abc",
+                "parent_id": "parent-uuid-123",
+                "created": "2026-01-01T00:01:00Z",
+            }
+        )
+    )
+    (child_dir / "events.jsonl").write_text(
+        '{"ts":"2026-01-01T00:01:00Z","event":"session:fork","session_id":"child-abc","data":{"parent_id":"parent-uuid-123"}}\n'
+    )
+    sessions = discover_sessions(amp_home)
+    assert "parent-uuid-123" in sessions, "events-only parent must be in sessions dict"
+    assert "child-abc" in sessions
+    roots = build_tree(sessions)
+    root_ids = [r.session_id for r in roots]
+    assert "parent-uuid-123" in root_ids, "parent should be root"
+    assert "child-abc" not in root_ids, "child should NOT be root"
+    # Verify child is linked to parent
+    parent_node = next(r for r in roots if r.session_id == "parent-uuid-123")
+    assert len(parent_node.children) == 1
+    assert parent_node.children[0].session_id == "child-abc"
+
+
+def test_name_in_session_node(tmp_path):
+    """SessionNode.name is populated from metadata.json."""
+    amp_home = tmp_path / ".amplifier"
+    s_dir = amp_home / "projects" / "proj" / "sessions" / "uuid-named"
+    s_dir.mkdir(parents=True)
+    (s_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "session_id": "uuid-named",
+                "created": "2026-01-01T00:00:00Z",
+                "name": "My Test Session",
+            }
+        )
+    )
+    (s_dir / "events.jsonl").write_text(
+        '{"ts":"2026-01-01T00:00:00Z","event":"session:start","session_id":"uuid-named"}\n'
+    )
+    sessions = discover_sessions(amp_home)
+    assert sessions["uuid-named"].name == "My Test Session"

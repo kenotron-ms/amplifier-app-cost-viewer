@@ -315,3 +315,17 @@ class TestSessionFilter:
         assert ROOT_SESSION_ID in ids, (
             f"True root session {ROOT_SESSION_ID!r} must appear in list; got {ids}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestSessionNameField — name field in API response
+# ---------------------------------------------------------------------------
+
+
+def test_session_name_in_list(client: TestClient, amp_home: Path) -> None:
+    """GET /api/sessions includes name field (may be None) in each entry."""
+    resp = client.get("/api/sessions")
+    assert resp.status_code == 200
+    sessions = resp.json()
+    for s in sessions:
+        assert "name" in s, f"'name' key must be present in session summary, got {s}"

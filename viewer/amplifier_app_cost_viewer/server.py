@@ -87,6 +87,7 @@ def _node_to_dict(node: SessionNode, include_spans: bool = False) -> dict[str, A
         "session_id": node.session_id,
         "project_slug": node.project_slug,
         "parent_id": node.parent_id,
+        "name": node.name,
         "start_ts": node.start_ts,
         "end_ts": node.end_ts,
         "duration_ms": node.duration_ms,

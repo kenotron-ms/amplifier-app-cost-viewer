@@ -202,6 +202,19 @@ class TestSection3Toolbar:
             "Session dropdown options must show last 8 chars of session_id"
         )
 
+    def test_toolbar_option_uses_session_name_when_present(self) -> None:
+        """Toolbar <option> label shows session.name when available."""
+        # The toolbar renderToolbar() must reference session.name to build the label
+        toolbar_fn = self.content.split("function renderToolbar()")[1].split(
+            "function "
+        )[0]
+        assert "session_id.slice(0, 8)" in toolbar_fn or ".slice(0, 8)" in toolbar_fn, (
+            "renderToolbar must use slice(0, 8) (first 8 chars) for the short session ID"
+        )
+        assert "s.name" in toolbar_fn or "session.name" in toolbar_fn, (
+            "renderToolbar must reference session.name to build the option label"
+        )
+
     def test_toolbar_has_cost_total_span(self) -> None:
         assert "cost-total" in self.content, (
             "renderToolbar must include span.cost-total"
@@ -356,10 +369,11 @@ class TestSection4TreePanel:
         )
 
     def test_render_tree_node_label_shows_last_8_chars(self) -> None:
-        # slice(-8) should appear multiple times (toolbar + tree)
+        # slice(-8) must appear at least once (in _renderTreeNode)
+        # Note: renderToolbar() now uses slice(0, 8) (first 8 chars) for a different format
         count = self.content.count("slice(-8)")
-        assert count >= 2, (
-            f"session label must show last 8 chars via slice(-8), found {count} occurrences"
+        assert count >= 1, (
+            f"tree session label must show last 8 chars via slice(-8), found {count} occurrences"
         )
 
     def test_render_tree_node_label_shows_agent_name(self) -> None:

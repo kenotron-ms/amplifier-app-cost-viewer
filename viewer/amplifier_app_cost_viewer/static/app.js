@@ -71,12 +71,16 @@ function renderToolbar() {
   toolbar.innerHTML = `
     <span class="toolbar-title">Amplifier Cost Viewer</span>
     <select id="session-select" aria-label="Select session">
-      ${state.sessions.map(s => `
+      ${state.sessions.map(s => {
+        const shortId = s.session_id.slice(0, 8);
+        const nameStr = s.name ? `${s.name} (${shortId})` : shortId;
+        return `
         <option value="${s.session_id}"
           ${s.session_id === state.activeSessionId ? 'selected' : ''}>
-          ${s.session_id.slice(-8)} — ${_formatDate(s.start_ts)} — $${(s.total_cost_usd || 0).toFixed(4)}
+          ${nameStr} — ${_formatDate(s.start_ts)} — $${(s.total_cost_usd || 0).toFixed(4)}
         </option>
-      `).join('')}
+        `;
+      }).join('')}
     </select>
     <span class="cost-total">All sessions: <strong>${costStr}</strong></span>
     <button id="refresh-btn" title="Refresh session list">&#8635;</button>

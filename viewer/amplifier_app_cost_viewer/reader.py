@@ -75,6 +75,7 @@ class SessionNode:
     total_cost_usd: float
     spans: list[Span]
     children: list[SessionNode]
+    name: str | None = None
     events_path: Path | None = field(default=None, compare=False, repr=False)
 
 
@@ -118,6 +119,34 @@ def _read_events(events_path: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+def _read_parent_from_events(events_path: Path) -> str | None:
+    """Read parent_id from events.jsonl by scanning first 10 lines for session:fork.
+
+    Returns the parent's session_id if found, None otherwise.  Reads at most
+    10 lines so it is fast even for large files.
+    """
+    try:
+        with events_path.open(encoding="utf-8") as f:
+            for _ in range(10):
+                line = f.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                    if event.get("event") == "session:fork":
+                        data = event.get("data", {})
+                        # Kernel emits parent_id in data for session:fork
+                        return data.get("parent_id") or data.get("parent")
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        pass
+    return None
 
 
 def normalize_timestamps(events_path: Path) -> int:
@@ -303,9 +332,10 @@ def parse_spans(
 def discover_sessions(amplifier_home: Path) -> dict[str, SessionNode]:
     """Discover all sessions under amplifier_home/projects/*/sessions/.
 
-    Scans amplifier_home/projects/*/sessions/*/metadata.json.  For each
-    session directory that has both metadata.json and events.jsonl, parses
-    the metadata and computes duration from the event log.
+    Requires at least events.jsonl to be present in each session directory.
+    Sessions that also have metadata.json become full nodes; sessions that have
+    only events.jsonl become lightweight stub nodes (just enough to anchor
+    their children in the tree).
 
     Returns:
         A flat dict mapping session_id → SessionNode.  Returns {} when
@@ -321,56 +351,83 @@ def discover_sessions(amplifier_home: Path) -> dict[str, SessionNode]:
         metadata_path = session_dir / "metadata.json"
         events_path = session_dir / "events.jsonl"
 
-        if not metadata_path.exists() or not events_path.exists():
-            continue
+        if not events_path.exists():
+            continue  # Need at least events.jsonl
 
-        try:
-            metadata = json.loads(metadata_path.read_text())
-            session_id = metadata["session_id"]
-            parent_id = metadata.get("parent_id")  # None or str
-            # project_slug: top-level (test/synthetic format), then
-            # config.project_slug (child session format), then derive
-            # from the project directory name (real root session format).
-            project_slug = (
-                metadata.get("project_slug")
-                or metadata.get("config", {}).get("project_slug")
-                or session_dir.parent.parent.name
-            )
-            created = metadata["created"]
-
-            # Compute duration_ms using normalize_timestamps and _read_events
-            events = _read_events(events_path)
-            duration_ms = 0
-            end_ts: str | None = None
-
+        if metadata_path.exists():
+            # Full session: read metadata
             try:
-                start_ms = normalize_timestamps(events_path)
-                for event in events:
-                    if event.get("event") == "session:end":
-                        end_ts = event.get("ts")
-                        break
-                if end_ts is not None:
-                    duration_ms = _ts_to_ms(end_ts) - start_ms
-            except ValueError:
-                pass  # No session:start event — leave duration_ms = 0
+                metadata = json.loads(metadata_path.read_text())
+                session_id = metadata.get("session_id") or session_dir.name
+                parent_id = metadata.get("parent_id")  # None or str
+                # project_slug: top-level (test/synthetic format), then
+                # config.project_slug (child session format), then derive
+                # from the project directory name (real root session format).
+                project_slug = (
+                    metadata.get("project_slug")
+                    or metadata.get("config", {}).get("project_slug")
+                    or session_dir.parent.parent.name
+                )
+                created = metadata.get("created", "")
+                name = metadata.get("name")  # may be None
 
+                # Compute duration_ms using normalize_timestamps and _read_events
+                events = _read_events(events_path)
+                duration_ms = 0
+                end_ts: str | None = None
+
+                try:
+                    start_ms = normalize_timestamps(events_path)
+                    for event in events:
+                        if event.get("event") == "session:end":
+                            end_ts = event.get("ts")
+                            break
+                    if end_ts is not None:
+                        duration_ms = _ts_to_ms(end_ts) - start_ms
+                except ValueError:
+                    pass  # No session:start event — leave duration_ms = 0
+
+                node = SessionNode(
+                    session_id=session_id,
+                    project_slug=project_slug,
+                    parent_id=parent_id,
+                    start_ts=created,
+                    end_ts=end_ts,
+                    duration_ms=duration_ms,
+                    cost_usd=0.0,
+                    total_cost_usd=0.0,
+                    spans=[],
+                    children=[],
+                    name=name,
+                    events_path=events_path,
+                )
+                sessions[session_id] = node
+
+            except (json.JSONDecodeError, OSError):
+                continue
+
+        else:
+            # Stub session: events.jsonl only — create minimal node for tree anchoring
+            session_id = session_dir.name
+            if session_id in sessions:
+                continue  # Already discovered via metadata path
+            parent_id = _read_parent_from_events(events_path)
+            project_slug = session_dir.parent.parent.name
             node = SessionNode(
                 session_id=session_id,
                 project_slug=project_slug,
                 parent_id=parent_id,
-                start_ts=created,
-                end_ts=end_ts,
-                duration_ms=duration_ms,
+                start_ts="",
+                end_ts=None,
+                duration_ms=0,
                 cost_usd=0.0,
                 total_cost_usd=0.0,
                 spans=[],
                 children=[],
+                name=None,
                 events_path=events_path,
             )
             sessions[session_id] = node
-
-        except (KeyError, json.JSONDecodeError, OSError):
-            continue
 
     return sessions
 
@@ -470,7 +527,7 @@ def build_session_tree(amplifier_home: Path) -> list[SessionNode]:
     for root in roots:
         aggregate_costs(root)
 
-    # Stage 5: Sort roots most-recent first
-    roots.sort(key=lambda n: _ts_to_ms(n.start_ts), reverse=True)
+    # Stage 5: Sort roots most-recent first (stub nodes with empty start_ts sort last)
+    roots.sort(key=lambda n: _ts_to_ms(n.start_ts) if n.start_ts else 0, reverse=True)
 
     return roots
