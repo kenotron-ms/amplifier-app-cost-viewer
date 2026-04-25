@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "amplifier-app-cost-viewer"
+version = "0.1.0"
+description = "Amplifier session cost and performance viewer"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+]
+
+[project.scripts]
+amplifier-cost-viewer = "amplifier_app_cost_viewer.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["amplifier_app_cost_viewer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
