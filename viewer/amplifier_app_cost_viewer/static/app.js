@@ -43,6 +43,7 @@ const state = {
   scrollTop:       0,  // scrollTop: 0 — vertical scroll offset in CSS pixels (tree is scroll master)
   hasMore:         false, // whether more sessions can be loaded
   loading: false,          // true while fetchSession/fetchSpans in flight
+  _zoomAnimRaf:    null,  // requestAnimationFrame handle for in-flight zoom animation
 };
 
 // =============================================================================
@@ -240,6 +241,60 @@ function _rowIndexMap(sessionData, expanded) {
   const map = new Map();
   rows.forEach((n, i) => map.set(n.session_id, i));
   return map;
+}
+
+/**
+ * Animate state.timeScale from its current value to targetScale over 100ms
+ * with ease-out cubic easing: eased = t * (2 - t).
+ *
+ * If anchorMs and anchorPx are provided, keeps that time position fixed at
+ * that screen pixel throughout the animation (cursor-anchored zoom).
+ * If null, only timeScale is interpolated and scrollLeft is left unchanged.
+ *
+ * @param {number}      targetScale - target ms-per-pixel value
+ * @param {number|null} anchorMs    - millisecond time position to keep fixed
+ * @param {number|null} anchorPx   - screen pixel position where anchorMs stays
+ */
+function _animateZoom(targetScale, anchorMs, anchorPx) {
+  const DURATION = 100; // ms
+  const startScale = state.timeScale;
+  const startScrollLeft = state.scrollLeft;
+  const startTime = performance.now();
+
+  // Cancel any in-flight zoom animation before starting a new one
+  if (state._zoomAnimRaf !== null) {
+    cancelAnimationFrame(state._zoomAnimRaf);
+    state._zoomAnimRaf = null;
+  }
+
+  function step(now) {
+    const elapsed = now - startTime;
+    const t = Math.min(elapsed / DURATION, 1);
+    const eased = t * (2 - t); // ease-out cubic
+
+    state.timeScale = startScale + (targetScale - startScale) * eased;
+
+    if (anchorMs !== null && anchorPx !== null) {
+      // Keep anchorMs fixed at anchorPx: scrollLeft = anchorMs/scale - anchorPx
+      state.scrollLeft = Math.max(0, anchorMs / state.timeScale - anchorPx);
+    }
+
+    renderAll();
+
+    if (t < 1) {
+      state._zoomAnimRaf = requestAnimationFrame(step);
+    } else {
+      // Set exact final values
+      state.timeScale = targetScale;
+      if (anchorMs !== null && anchorPx !== null) {
+        state.scrollLeft = Math.max(0, anchorMs / targetScale - anchorPx);
+      }
+      renderAll();
+      state._zoomAnimRaf = null;
+    }
+  }
+
+  state._zoomAnimRaf = requestAnimationFrame(step);
 }
 
 // =============================================================================
@@ -677,26 +732,7 @@ class AcvTimeline extends HTMLElement {
         const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldScale * factor));
         if (newScale === oldScale) return;
 
-        state.timeScale = newScale;
-
-        // Keep cursor ms fixed: cursorMs / newScale - cursorX = new scrollLeft
-        state.scrollLeft = Math.max(0, cursorMs / newScale - cursorX);
-
-        // Update zoom label
-        const label = this._root.querySelector('#zoom-label')
-          || document.getElementById('zoom-label');
-        if (label) {
-          label.textContent = newScale < 1
-            ? `${(1 / newScale).toFixed(1)}px/ms`
-            : `${newScale.toFixed(0)}ms/px`;
-        }
-
-        // RAF-debounced redraw (same pattern as ruler zoom)
-        if (this._zoomRaf) cancelAnimationFrame(this._zoomRaf);
-        this._zoomRaf = requestAnimationFrame(() => {
-          this.#draw();
-          this._zoomRaf = null;
-        });
+        _animateZoom(newScale, cursorMs, cursorX);
       }, { passive: false });
 
       // Vertical wheel on canvas: route to tree's scroll container (tree = scroll master)
@@ -1042,12 +1078,9 @@ class AcvTimeline extends HTMLElement {
 
     // Zoom factor
     const factor = e.deltaY > 0 ? 1.15 : 0.87;
-    state.timeScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, state.timeScale * factor));
+    const targetScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, state.timeScale * factor));
 
-    // Adjust scrollLeft so the same ms stays under cursor
-    state.scrollLeft = Math.max(0, msAtCursor / state.timeScale - cursorPx);
-
-    renderAll();
+    _animateZoom(targetScale, msAtCursor, cursorPx);
   }
 
   /** Canvas click: hit-test spans, dispatch 'span-select' CustomEvent. */
@@ -1447,14 +1480,14 @@ async function init() {
 
     // Wire: zoom-in → decrease ms/px (zoom in = fewer ms per pixel)
     toolbar.addEventListener('zoom-in', () => {
-      state.timeScale = Math.max(ZOOM_MIN, state.timeScale / 1.5);
-      renderAll();
+      const targetScale = Math.max(ZOOM_MIN, state.timeScale / 1.5);
+      _animateZoom(targetScale, null, null);
     });
 
     // Wire: zoom-out → increase ms/px (zoom out = more ms per pixel)
     toolbar.addEventListener('zoom-out', () => {
-      state.timeScale = Math.min(ZOOM_MAX, state.timeScale * 1.5);
-      renderAll();
+      const targetScale = Math.min(ZOOM_MAX, state.timeScale * 1.5);
+      _animateZoom(targetScale, null, null);
     });
 
     // Wire: refresh → reload all data from server
@@ -1533,15 +1566,13 @@ async function init() {
       case 'KeyW':
       case 'Equal': // = key (zoom in)
         e.preventDefault();
-        state.timeScale = Math.max(ZOOM_MIN, state.timeScale * Math.pow(0.7, shift));
-        renderAll();
+        _animateZoom(Math.max(ZOOM_MIN, state.timeScale * Math.pow(0.7, shift)), null, null);
         break;
 
       case 'KeyS':
       case 'Minus': // - key (zoom out)
         e.preventDefault();
-        state.timeScale = Math.min(ZOOM_MAX, state.timeScale * Math.pow(1.3, shift));
-        renderAll();
+        _animateZoom(Math.min(ZOOM_MAX, state.timeScale * Math.pow(1.3, shift)), null, null);
         break;
 
       case 'KeyA':

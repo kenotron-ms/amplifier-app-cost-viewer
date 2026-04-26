@@ -1725,3 +1725,47 @@ class TestTreeRulerSpacer:
             ".ruler-spacer must have 'flex-shrink: 0' so it keeps its height "
             "and doesn't collapse in a flex container"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Smooth Animated Zoom
+# ---------------------------------------------------------------------------
+
+
+class TestAnimatedZoom:
+    """Zoom changes must animate over 100ms with ease-out cubic easing."""
+
+    def test_animate_zoom_function_exists(self, app_js_code: str) -> None:
+        """_animateZoom function must be defined in app.js."""
+        assert "_animateZoom" in app_js_code, (
+            "app.js must define an _animateZoom() function that interpolates "
+            "state.timeScale over 100ms instead of jumping instantly"
+        )
+
+    def test_zoom_uses_ease_out(self, app_js_code: str) -> None:
+        """_animateZoom must use ease-out cubic interpolation via 'eased' variable."""
+        assert "eased" in app_js_code, (
+            "app.js must use an 'eased' variable for t*(2-t) ease-out cubic "
+            "interpolation inside _animateZoom"
+        )
+
+    def test_state_has_zoom_anim_raf(self, app_js_code: str) -> None:
+        """The state object must have a _zoomAnimRaf field for tracking the RAF handle."""
+        assert "_zoomAnimRaf" in app_js_code, (
+            "state must include a '_zoomAnimRaf' field so in-flight zoom "
+            "animations can be cancelled"
+        )
+
+    def test_zoom_animation_cancels_previous(self, app_js_code: str) -> None:
+        """_animateZoom must cancel any in-flight animation before starting a new one."""
+        assert "cancelAnimationFrame" in app_js_code, (
+            "app.js must call cancelAnimationFrame() in _animateZoom to cancel "
+            "any previously running zoom animation before starting a new one"
+        )
+
+    def test_zoom_animation_uses_performance_now(self, app_js_code: str) -> None:
+        """_animateZoom must use performance.now() to track animation time."""
+        assert "performance.now" in app_js_code, (
+            "app.js must use performance.now() in _animateZoom to measure "
+            "elapsed animation time accurately"
+        )
