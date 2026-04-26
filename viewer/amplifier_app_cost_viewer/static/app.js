@@ -543,18 +543,55 @@ function _applyZoom(factor, cursorXPx) {
 }
 
 
+// RAF handle for debounced zoom re-render — prevents jank on fast scroll.
+let _zoomRaf = null;
+
 function _initGanttZoom() {
-  const ganttPanel = document.getElementById('gantt-panel');
-  if (!ganttPanel) return;
-  ganttPanel.addEventListener('wheel', e => {
-    if (!e.ctrlKey && !e.metaKey) return;  // only zoom with Ctrl/Cmd held
+  // Zoom by scrolling on the TIME RULER (no modifier needed — like Chrome DevTools).
+  // The gantt-rows area scrolls horizontally as normal.
+  const ruler = document.getElementById('time-ruler');
+  if (!ruler) return;
+
+  ruler.style.cursor = 'ew-resize';
+
+  ruler.addEventListener('wheel', e => {
     e.preventDefault();
+    e.stopPropagation();
     const factor = e.deltaY > 0 ? 1.3 : (1 / 1.3);
-    // Zoom centered on cursor x position within gantt-rows
     const ganttRows = document.getElementById('gantt-rows');
-    const rect = ganttRows ? ganttRows.getBoundingClientRect() : ganttPanel.getBoundingClientRect();
+    const rect = ruler.getBoundingClientRect();
     const cursorX = e.clientX - rect.left + (ganttRows ? ganttRows.scrollLeft : 0);
-    _applyZoom(factor, cursorX);
+
+    // Compute new scale immediately (cheap)
+    const oldScale = state.timeScale;
+    const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldScale * factor));
+    if (newScale === oldScale) return;
+
+    // Scroll-anchor: keep cursor x fixed on screen
+    let scrollAdjust = 0;
+    if (ganttRows) {
+      const msAtCursor = cursorX * oldScale;
+      scrollAdjust = msAtCursor / newScale - cursorX;
+    }
+
+    state.timeScale = newScale;
+
+    // Update label immediately (cheap DOM write)
+    const label = document.getElementById('zoom-label');
+    if (label) {
+      const mpp = newScale;
+      label.textContent = mpp < 1 ? `${(1/mpp).toFixed(1)}px/ms` : `${mpp.toFixed(0)}ms/px`;
+    }
+
+    // Debounce the expensive SVG re-render to one frame
+    if (_zoomRaf) cancelAnimationFrame(_zoomRaf);
+    _zoomRaf = requestAnimationFrame(() => {
+      renderGantt();
+      if (ganttRows && scrollAdjust !== 0) {
+        ganttRows.scrollLeft += scrollAdjust;
+      }
+      _zoomRaf = null;
+    });
   }, { passive: false });
 }
 
@@ -859,6 +896,9 @@ async function loadSession(id) {
   const maxEndMs = state.spans.reduce((m, s) => Math.max(m, s.end_ms || 0), 1);
   const ganttWidth = document.getElementById('gantt-panel').clientWidth || 1000;
   state.timeScale = maxEndMs / Math.max(ganttWidth - 80, 400);
+  // Sync zoom label to the computed initial scale immediately.
+  const _initLabel = document.getElementById('zoom-label');
+  if (_initLabel) _initLabel.textContent = `${state.timeScale.toFixed(0)}ms/px`;
 
   renderToolbar();
   renderTreePanel();

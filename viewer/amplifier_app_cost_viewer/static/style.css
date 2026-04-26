@@ -114,6 +114,25 @@ body {
   letter-spacing: 0.02em;
 }
 
+/* Session selector — shrinks to make room for zoom controls */
+#session-select {
+  flex: 1;
+  min-width: 120px;
+  max-width: 380px;
+}
+
+/* Zoom controls never shrink — always visible */
+.zoom-controls {
+  flex-shrink: 0;
+}
+
+/* Cost label and title never shrink */
+.toolbar-title,
+.cost-total {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 /* Toolbar select/button shared styles */
 #toolbar select,
 #toolbar button {
