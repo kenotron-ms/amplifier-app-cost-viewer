@@ -39,6 +39,7 @@ const state = {
   selectedSpan:    null,  // span shown in the detail panel
   timeScale:       1,     // ms per pixel
   scrollLeft:      0,     // timeline horizontal scroll position (px)
+  scrollTop:       0,  // scrollTop: 0 — vertical scroll offset in CSS pixels (tree is scroll master)
   hasMore:         false, // whether more sessions can be loaded
   loading: false,          // true while fetchSession/fetchSpans in flight
 };
@@ -372,6 +373,12 @@ class AcvTree extends HTMLElement {
   connectedCallback() {
     subscribe(() => this.update());
     this.update();
+    // Tree is the vertical scroll master — push scrollTop to state and notify canvas
+    this.addEventListener('scroll', () => {
+      state.scrollTop = this.scrollTop;
+      const timeline = document.getElementById('timeline');
+      if (timeline) timeline.notify();
+    });
   }
 
   update() {
@@ -555,6 +562,11 @@ class AcvTimeline extends HTMLElement {
     this.#scheduleRedraw();
   }
 
+  /** Trigger a canvas-only redraw (e.g. after a scroll event from the tree). */
+  notify() {
+    this.#scheduleRedraw();
+  }
+
   /** Set loading state — shows overlay on canvas while true. */
   set loading(v) {
     this.#loading = !!v;
@@ -683,6 +695,19 @@ class AcvTimeline extends HTMLElement {
           this._zoomRaf = null;
         });
       }, { passive: false });
+
+      // Vertical wheel on canvas: route to tree's scroll container (tree = scroll master)
+      canvas.addEventListener('wheel', e => {
+        if (e.ctrlKey || e.metaKey) return; // zoom handler takes this
+        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+          e.preventDefault();
+          const treeEl = document.getElementById('tree');
+          if (treeEl) {
+            treeEl.scrollTop += e.deltaY;
+            // The tree's 'scroll' event fires and updates state.scrollTop + notifies canvas
+          }
+        }
+      }, { passive: false });
     }
     return true;
   }
@@ -723,6 +748,7 @@ class AcvTimeline extends HTMLElement {
     const ch      = this.#canvas.height / (window.devicePixelRatio || 1);
     const ts      = state.timeScale;
     const scrollL = state.scrollLeft;
+    const scrollTop = state.scrollTop || 0;
 
     // Loading overlay — shown while session data is being fetched
     if (this.#loading) {
@@ -759,17 +785,16 @@ class AcvTimeline extends HTMLElement {
       ? _rowIndexMap(state.sessionData, state.expandedSessions)
       : new Map();
 
-    const numRows = rowMap.size || 1;
+    // 5. Draw alternating row backgrounds (#0d1117 even, #161b22 odd), clipped to viewport.
+    //    Fill entire canvas with base color first, then paint only the visible rows.
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, cw, ch);
 
-    // 5. Draw alternating row backgrounds (#0d1117 even, #161b22 odd)
-    for (let i = 0; i < numRows; i++) {
-      ctx.fillStyle = i % 2 === 0 ? '#0d1117' : '#161b22';
-      ctx.fillRect(0, i * ROW_H, cw, ROW_H);
-    }
-    // Fill any remaining canvas area below the rows
-    if (numRows * ROW_H < ch) {
-      ctx.fillStyle = '#0d1117';
-      ctx.fillRect(0, numRows * ROW_H, cw, ch - numRows * ROW_H);
+    for (const [, rowIdx] of rowMap) {
+      const y = rowIdx * ROW_H - scrollTop;
+      if (y + ROW_H < 0 || y > ch) continue; // off-screen — skip
+      ctx.fillStyle = rowIdx % 2 === 0 ? '#0d1117' : '#161b22';
+      ctx.fillRect(0, y, cw, ROW_H);
     }
 
     // 6. Draw vertical grid lines matching ruler tick intervals (strokeStyle #21262d)
@@ -807,10 +832,14 @@ class AcvTimeline extends HTMLElement {
       const duration = Math.max(0, (span.end_ms || 0) - (span.start_ms || 0));
       const w        = Math.max(2, duration / ts); // minimum 2px width
 
-      // Visibility culling: skip off-screen spans
+      // Visibility culling: skip off-screen spans (horizontal)
       if (x + w < -10 || x > cw + 10) continue;
 
-      const y     = rowIdx * ROW_H + (ROW_H - SPAN_H) / 2;
+      const y     = rowIdx * ROW_H - scrollTop + (ROW_H - SPAN_H) / 2;
+
+      // Visibility culling: skip off-screen spans (vertical)
+      if (y + SPAN_H < -10 || y > ch + 10) continue;
+
       const color = span.color || '#64748B'; // fallback color
 
       let rects = batches.get(color);
@@ -845,7 +874,7 @@ class AcvTimeline extends HTMLElement {
       if (x + w < -10 || x > cw + 10) continue;
       if (w <= 60) continue; // only label spans wider than 60px
 
-      const y = rowIdx * ROW_H + ROW_H / 2;
+      const y = rowIdx * ROW_H - scrollTop + ROW_H / 2;
 
       // Build label: model·cost for LLM spans, tool_name for tool spans
       let label = '';
@@ -891,7 +920,7 @@ class AcvTimeline extends HTMLElement {
         if (gapW <= 200) continue;      // only label gaps > 200px
         if (gapX2 < 0 || gapX1 > cw) continue;
         const midX = (gapX1 + gapX2) / 2;
-        const y    = rowIdx * ROW_H + ROW_H / 2;
+        const y    = rowIdx * ROW_H - scrollTop + ROW_H / 2;
         ctx.fillText(`idle ${_formatMs(gapDuration)}`, midX, y);
       }
     }
@@ -1025,8 +1054,9 @@ class AcvTimeline extends HTMLElement {
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
 
-    const ts      = state.timeScale;
-    const scrollL = state.scrollLeft;
+    const ts        = state.timeScale;
+    const scrollL   = state.scrollLeft;
+    const scrollTop = state.scrollTop || 0;
     const rowMap  = state.sessionData
       ? _rowIndexMap(state.sessionData, state.expandedSessions)
       : new Map();
@@ -1038,7 +1068,7 @@ class AcvTimeline extends HTMLElement {
       const x        = (span.start_ms || 0) / ts - scrollL;
       const duration = Math.max(0, (span.end_ms || 0) - (span.start_ms || 0));
       const w        = Math.max(2, duration / ts);
-      const y        = rowIdx * ROW_H + (ROW_H - SPAN_H) / 2;
+      const y        = rowIdx * ROW_H - scrollTop + (ROW_H - SPAN_H) / 2;
 
       if (clickX >= x && clickX <= x + w && clickY >= y && clickY <= y + SPAN_H) {
         this.dispatchEvent(new CustomEvent('span-select', {

@@ -1649,3 +1649,50 @@ def test_canvas_ctrl_scroll_zoom(app_js_code: str) -> None:
     assert "metaKey" in app_js_code, (
         "Canvas wheel listener must check e.metaKey for Cmd+scroll (macOS)"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Vertical scroll sync — tree as scroll master, canvas as follower
+# ---------------------------------------------------------------------------
+
+
+def test_state_has_scroll_top(app_js_code: str) -> None:
+    """state object must track vertical scroll offset."""
+    assert "scrollTop: 0" in app_js_code, (
+        "state must declare 'scrollTop: 0' to track vertical scroll offset"
+    )
+
+
+def test_canvas_subtracts_scroll_top(app_js_code: str) -> None:
+    """Canvas draw must subtract scrollTop from row y positions."""
+    assert "scrollTop" in app_js_code, "app.js must reference scrollTop"
+    # The draw function must use vertical scroll offset
+    assert (
+        "- scrollTop" in app_js_code
+        or "-scrollTop" in app_js_code
+        or "state.scrollTop" in app_js_code
+    ), (
+        "#draw() must use scrollTop offset when computing row y positions "
+        "(subtract scrollTop from rowIdx * ROW_H)"
+    )
+
+
+def test_tree_dispatches_scroll_to_state(app_js_code: str) -> None:
+    """AcvTree must listen for scroll events and update state.scrollTop."""
+    assert "state.scrollTop" in app_js_code, (
+        "AcvTree must update state.scrollTop on scroll events"
+    )
+    assert "scroll" in app_js_code, (
+        "AcvTree must add a 'scroll' event listener to sync vertical position"
+    )
+
+
+def test_canvas_vertical_wheel_routes_to_tree(app_js_code: str) -> None:
+    """Canvas wheel handler must route vertical scroll to the tree element."""
+    # The vertical wheel handler routes to tree's scrollTop
+    assert "deltaY" in app_js_code, (
+        "Canvas wheel handler must read e.deltaY for vertical scroll routing"
+    )
+    assert "scrollTop" in app_js_code, (
+        "Canvas vertical wheel must update scrollTop to keep tree as scroll master"
+    )
