@@ -7,23 +7,15 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <header id="toolbar">
-    <span class="toolbar-title">Amplifier Cost Viewer</span>
-  </header>
+  <acv-toolbar id="toolbar"></acv-toolbar>
 
   <main id="main">
-    <aside id="tree-panel">
-      <div class="panel-placeholder">Loading sessions…</div>
-    </aside>
-
-    <section id="gantt-panel">
-      <div id="time-ruler"></div>
-      <div id="gantt-rows"></div>
-    </section>
+    <acv-tree id="tree"></acv-tree>
+    <acv-timeline id="timeline"></acv-timeline>
   </main>
 
-  <footer id="detail-panel" class="hidden"></footer>
+  <acv-detail id="detail"></acv-detail>
 
-  <script src="/static/app.js"></script>
+  <script type="module" src="/static/app.js"></script>
 </body>
 </html>
