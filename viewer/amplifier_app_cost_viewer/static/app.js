@@ -211,7 +211,7 @@ class AcvToolbar extends HTMLElement {
           <option
             value=${s.session_id}
             ?selected=${s.session_id === state.activeSessionId}
-          >${s.session_id.slice(-8)} — ${_formatDate(s.created_at)} — $${(s.total_cost_usd || 0).toFixed(4)} — ${_fmtTokens(s.total_tokens || 0)} tok</option>
+          >${s.session_id.slice(-8)}${s.agent_name ? ` · ${s.agent_name}` : ''} — ${_formatDate(s.created_at)} — $${(s.total_cost_usd || 0).toFixed(4)} — ${_fmtTokens(s.total_tokens || 0)} tok</option>
         `)}
         ${state.hasMore ? html`<option value="__load_more__">Load more…</option>` : ''}
       </select>
@@ -471,7 +471,6 @@ class AcvDetail extends HTMLElement {
         <div class="detail-section">
           <div>start: ${span.start_ms ?? 0}ms</div>
           <div>end: ${span.end_ms ?? 0}ms</div>
-          <div>duration: ${_formatMs((span.end_ms ?? 0) - (span.start_ms ?? 0))}</div>
           ${span.cost_usd != null ? html`<div>cost: $${span.cost_usd.toFixed(6)}</div>` : ''}
         </div>
       ` : html`<div class="placeholder" style="color:var(--text-muted,#8b949e);font-style:italic">Select a span to view details.</div>`}
