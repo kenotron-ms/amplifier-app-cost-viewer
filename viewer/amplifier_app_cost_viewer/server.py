@@ -213,7 +213,10 @@ def list_sessions(
     intentionally excluded.
     """
     roots = _get_roots()
-    true_roots = [r for r in roots if r.parent_id is None]
+    # Only include sessions with metadata.json (start_ts != "").
+    # Stub nodes (events-only, no metadata) exist solely to anchor their
+    # children in the tree and should never appear in the user-facing list.
+    true_roots = [r for r in roots if r.parent_id is None and r.start_ts]
     total = len(true_roots)
     page = true_roots[offset : offset + limit]
     return {

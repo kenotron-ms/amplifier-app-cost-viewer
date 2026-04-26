@@ -559,9 +559,13 @@ def build_session_tree(amplifier_home: Path) -> list[SessionNode]:
     for root in roots:
         aggregate_costs(root)
 
-    # Stage 5: Sort roots most-recent first (stub nodes with empty start_ts sort last)
-    return sorted(
-        roots,
-        key=lambda n: n.start_ts or "",
-        reverse=True,
-    )
+    # Stage 5: Sort — named sessions first (they're the meaningful ones), then
+    # by recency within each group.  Stub nodes (empty start_ts) sort last.
+    def _sort_key(n: SessionNode) -> tuple[int, str]:
+        # named_rank=1 for named, 0 for unnamed.  With reverse=True the higher
+        # rank sorts first, so named sessions always appear before unnamed ones.
+        # Within each group, the ISO start_ts string sorts most-recent first.
+        named_rank = 1 if n.name else 0
+        return (named_rank, n.start_ts or "")
+
+    return sorted(roots, key=_sort_key, reverse=True)
