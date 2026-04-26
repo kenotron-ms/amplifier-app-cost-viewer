@@ -970,7 +970,7 @@ class AcvDetail extends HTMLElement {
   }
 
   /** Property setter: called by AcvTimeline when selectedSpan changes. */
-  set data(v) {
+  set data(_) {
     this.update();
   }
 
@@ -1001,15 +1001,24 @@ class AcvDetail extends HTMLElement {
   // Private: title for the detail panel header
   // ---------------------------------------------------------------------------
 
+  /**
+   * Returns `{ ok, icon, color }` for a span's success state.
+   * Centralises the success indicator contract used by #titleFor and #toolRows.
+   */
+  #successDisplay(span) {
+    const ok    = span.success !== false;
+    const icon  = ok ? '✓' : '✗';
+    const color = ok ? '#3fb950' : '#f85149';
+    return { ok, icon, color };
+  }
+
   /** Returns the header title for a span based on its type. */
   #titleFor(span) {
     if (span.type === 'thinking') {
       return html`<span style="color:#a78bfa">thinking</span>`;
     }
     if (span.type === 'tool') {
-      const ok    = span.success !== false;
-      const icon  = ok ? '✓' : '✗';
-      const color = ok ? '#3fb950' : '#f85149';
+      const { icon, color } = this.#successDisplay(span);
       return html`${span.tool_name || 'tool'} <span style="color:${color}">${icon}</span>`;
     }
     // LLM span: provider/model
@@ -1049,10 +1058,8 @@ class AcvDetail extends HTMLElement {
 
   /** Renders tool-specific rows: duration and success indicator. */
   #toolRows(span) {
-    const duration = _formatMs(Math.max(0, (span.end_ms || 0) - (span.start_ms || 0)));
-    const ok       = span.success !== false;
-    const icon     = ok ? '✓' : '✗';
-    const color    = ok ? '#3fb950' : '#f85149';
+    const duration        = _formatMs(Math.max(0, (span.end_ms || 0) - (span.start_ms || 0)));
+    const { icon, color } = this.#successDisplay(span);
     return html`
       <span class="label">duration</span> <span class="value">${duration}</span>
       <span class="label">success</span>  <span class="value" style="color:${color}">${icon}</span>
