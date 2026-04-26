@@ -551,23 +551,171 @@ class AcvTimeline extends HTMLElement {
   /** Draw canvas content: clear background, render spans or placeholder. */
   #draw() {
     if (!this.#ctx || !this.#canvas) return;
-    const ctx = this.#ctx;
-    const w   = this.#canvas.width  / (window.devicePixelRatio || 1);
-    const h   = this.#canvas.height / (window.devicePixelRatio || 1);
+    const ctx     = this.#ctx;
+    const cw      = this.#canvas.width  / (window.devicePixelRatio || 1);
+    const ch      = this.#canvas.height / (window.devicePixelRatio || 1);
+    const ts      = state.timeScale;
+    const scrollL = state.scrollLeft;
 
-    // Clear to dark background
-    ctx.fillStyle = '#0d1117';
-    ctx.fillRect(0, 0, w, h);
+    // 1. Resize is already done by #resizeCanvas before #draw is called.
 
+    // 2. clearRect full canvas
+    ctx.clearRect(0, 0, cw, ch);
+
+    // 3. Early return with 'No spans' message if empty
     if (!state.spans || state.spans.length === 0) {
+      ctx.fillStyle = '#0d1117';
+      ctx.fillRect(0, 0, cw, ch);
       ctx.fillStyle = '#8b949e';
       ctx.font = '12px "SF Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('No spans to display.', w / 2, h / 2);
+      ctx.textBaseline = 'middle';
+      ctx.fillText('No spans to display.', cw / 2, ch / 2);
       return;
     }
 
-    // Canvas Gantt rendering will be added in a future task
+    // 4. Build rowMap via _rowIndexMap
+    const rowMap = state.sessionData
+      ? _rowIndexMap(state.sessionData, state.expandedSessions)
+      : new Map();
+
+    const numRows = rowMap.size || 1;
+
+    // 5. Draw alternating row backgrounds (#0d1117 even, #161b22 odd)
+    for (let i = 0; i < numRows; i++) {
+      ctx.fillStyle = i % 2 === 0 ? '#0d1117' : '#161b22';
+      ctx.fillRect(0, i * ROW_H, cw, ROW_H);
+    }
+    // Fill any remaining canvas area below the rows
+    if (numRows * ROW_H < ch) {
+      ctx.fillStyle = '#0d1117';
+      ctx.fillRect(0, numRows * ROW_H, cw, ch - numRows * ROW_H);
+    }
+
+    // 6. Draw vertical grid lines matching ruler tick intervals (strokeStyle #21262d)
+    {
+      const visibleMs  = cw * ts;
+      const INTERVALS  = [500, 5000, 30000, 60000, 300000, 900000];
+      let interval     = INTERVALS[INTERVALS.length - 1];
+      for (const iv of INTERVALS) {
+        if (visibleMs / iv <= 14) { interval = iv; break; }
+      }
+      const startMs   = scrollL * ts;
+      const endMs     = startMs + visibleMs;
+      const firstTick = Math.ceil(startMs / interval) * interval;
+
+      ctx.beginPath();
+      ctx.strokeStyle = '#21262d';
+      ctx.lineWidth   = 1;
+      for (let ms = firstTick; ms <= endMs; ms += interval) {
+        const px = (ms / ts) - scrollL;
+        if (px < 0 || px > cw) continue;
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, ch);
+      }
+      ctx.stroke();
+    }
+
+    // 7. Color-batched span drawing
+    //    Batch spans by color into Map<color, rects[]> for efficient rendering.
+    const batches = new Map(); // Map<color, Array<{x,y,w,h}>>
+
+    for (const span of state.spans) {
+      const rowIdx = rowMap.get(span.session_id);
+      if (rowIdx === undefined) continue; // collapsed / not visible
+
+      const x        = (span.start_ms || 0) / ts - scrollL;
+      const duration = Math.max(0, (span.end_ms || 0) - (span.start_ms || 0));
+      const w        = Math.max(2, duration / ts); // minimum 2px width
+
+      // Visibility culling: skip off-screen spans
+      if (x + w < -10 || x > cw + 10) continue;
+
+      const y     = rowIdx * ROW_H + (ROW_H - SPAN_H) / 2;
+      const color = span.color || '#64748B'; // fallback color
+
+      let rects = batches.get(color);
+      if (!rects) { rects = []; batches.set(color, rects); }
+      rects.push({ x, y, w, h: SPAN_H });
+    }
+
+    // Draw each color batch: beginPath, rect each, fill()
+    for (const [color, rects] of batches) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      for (const r of rects) {
+        ctx.rect(r.x, r.y, r.w, r.h);
+      }
+      ctx.fill();
+    }
+
+    // 8. Text labels on spans wider than 60px
+    ctx.font          = '11px "SF Mono", monospace';
+    ctx.fillStyle     = '#e6edf3';
+    ctx.textAlign     = 'left';
+    ctx.textBaseline  = 'middle';
+
+    for (const span of state.spans) {
+      const rowIdx = rowMap.get(span.session_id);
+      if (rowIdx === undefined) continue;
+
+      const x        = (span.start_ms || 0) / ts - scrollL;
+      const duration = Math.max(0, (span.end_ms || 0) - (span.start_ms || 0));
+      const w        = Math.max(2, duration / ts);
+
+      if (x + w < -10 || x > cw + 10) continue;
+      if (w <= 60) continue; // only label spans wider than 60px
+
+      const y = rowIdx * ROW_H + ROW_H / 2;
+
+      // Build label: model·cost for LLM spans, tool_name for tool spans
+      let label = '';
+      if (span.type === 'llm' || span.model) {
+        const costStr = span.cost_usd != null ? `$${span.cost_usd.toFixed(4)}` : '';
+        label = span.model
+          ? `${span.model}${costStr ? '·' + costStr : ''}`
+          : costStr;
+      } else if (span.tool_name) {
+        label = span.tool_name;
+      } else {
+        label = span.name || '';
+      }
+      if (!label) continue;
+
+      ctx.fillText(label, x + 4, y, w - 8); // maxWidth = w - 8
+    }
+
+    // 9. Orchestrator gap labels: 'idle Xms' in dark spaces > 200px
+    const spansBySession = new Map();
+    for (const span of state.spans) {
+      const sid = span.session_id;
+      if (!spansBySession.has(sid)) spansBySession.set(sid, []);
+      spansBySession.get(sid).push(span);
+    }
+
+    ctx.font      = 'italic 10px "SF Mono", monospace';
+    ctx.fillStyle = '#8b949e';
+    ctx.textAlign = 'center';
+
+    for (const [sid, spans] of spansBySession) {
+      const rowIdx = rowMap.get(sid);
+      if (rowIdx === undefined) continue;
+      const sorted = spans.slice().sort((a, b) => (a.start_ms || 0) - (b.start_ms || 0));
+      for (let i = 0; i < sorted.length - 1; i++) {
+        const gapStartMs  = sorted[i].end_ms || 0;
+        const gapEndMs    = sorted[i + 1].start_ms || 0;
+        const gapDuration = gapEndMs - gapStartMs;
+        if (gapDuration <= 0) continue;
+        const gapX1 = gapStartMs / ts - scrollL;
+        const gapX2 = gapEndMs   / ts - scrollL;
+        const gapW  = gapX2 - gapX1;
+        if (gapW <= 200) continue;      // only label gaps > 200px
+        if (gapX2 < 0 || gapX1 > cw) continue;
+        const midX = (gapX1 + gapX2) / 2;
+        const y    = rowIdx * ROW_H + ROW_H / 2;
+        ctx.fillText(`idle ${_formatMs(gapDuration)}`, midX, y);
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -690,9 +838,37 @@ class AcvTimeline extends HTMLElement {
     renderAll();
   }
 
-  /** Canvas click stub — will select spans in a future task. */
+  /** Canvas click: hit-test spans, dispatch 'span-select' CustomEvent. */
   #onCanvasClick(e) {
-    // Stub: future implementation will pick span under cursor
+    if (!this.#canvas) return;
+    const rect   = this.#canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    const ts      = state.timeScale;
+    const scrollL = state.scrollLeft;
+    const rowMap  = state.sessionData
+      ? _rowIndexMap(state.sessionData, state.expandedSessions)
+      : new Map();
+
+    for (const span of state.spans) {
+      const rowIdx = rowMap.get(span.session_id);
+      if (rowIdx === undefined) continue;
+
+      const x        = (span.start_ms || 0) / ts - scrollL;
+      const duration = Math.max(0, (span.end_ms || 0) - (span.start_ms || 0));
+      const w        = Math.max(2, duration / ts);
+      const y        = rowIdx * ROW_H + (ROW_H - SPAN_H) / 2;
+
+      if (clickX >= x && clickX <= x + w && clickY >= y && clickY <= y + SPAN_H) {
+        this.dispatchEvent(new CustomEvent('span-select', {
+          bubbles:  true,
+          composed: true,
+          detail:   { span },
+        }));
+        return;
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -934,6 +1110,16 @@ async function init() {
     // Wire: session-select → update activeSessionId and renderAll
     tree.addEventListener('session-select', e => {
       state.activeSessionId = e.detail.id;
+      renderAll();
+    });
+  }
+
+  // Wire timeline events: span-select
+  const timeline = document.querySelector('acv-timeline');
+  if (timeline) {
+    // Wire: span-select → set state.selectedSpan and call renderAll()
+    timeline.addEventListener('span-select', e => {
+      state.selectedSpan = e.detail.span;
       renderAll();
     });
   }

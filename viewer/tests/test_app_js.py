@@ -970,3 +970,191 @@ class TestAcvTimeline:
         assert "INPUT" in content or "SELECT" in content or "TEXTAREA" in content, (
             "init() keyboard handler must skip when target is INPUT/SELECT/TEXTAREA"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Canvas Gantt — color-batched span drawing + visibility culling
+# ---------------------------------------------------------------------------
+
+
+class TestCanvasDraw:
+    """Tests for the #draw() canvas Gantt implementation in AcvTimeline."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    # --- clearRect ---
+
+    def test_draw_calls_clear_rect(self) -> None:
+        assert "clearRect" in self.content, (
+            "#draw() must call clearRect to clear the canvas before drawing"
+        )
+
+    # --- Alternating row backgrounds ---
+
+    def test_draw_alternating_row_even_background(self) -> None:
+        assert "#0d1117" in self.content, (
+            "#draw() must use #0d1117 for even row backgrounds"
+        )
+
+    def test_draw_alternating_row_odd_background(self) -> None:
+        assert "#161b22" in self.content, (
+            "#draw() must use #161b22 for odd row backgrounds"
+        )
+
+    # --- Color-batched drawing ---
+
+    def test_draw_uses_begin_path(self) -> None:
+        assert "beginPath" in self.content, (
+            "#draw() color-batched drawing must call beginPath() per color batch"
+        )
+
+    def test_draw_uses_fill_for_batches(self) -> None:
+        assert "fill()" in self.content, (
+            "#draw() color-batched drawing must call fill() to paint each color batch"
+        )
+
+    def test_draw_batches_by_color_map(self) -> None:
+        # Batching uses a Map<color, rects[]> structure
+        assert "Map" in self.content, (
+            "#draw() must use a Map to batch spans by color"
+        )
+
+    # --- Text labels on wide spans ---
+
+    def test_draw_uses_fill_text(self) -> None:
+        assert "fillText" in self.content, (
+            "#draw() must call fillText() to draw text labels on wide spans"
+        )
+
+    def test_draw_checks_width_for_text_label(self) -> None:
+        # Must check width > 60px before drawing text
+        assert "60" in self.content, (
+            "#draw() must check span width > 60px before drawing text label"
+        )
+
+    def test_draw_text_label_uses_max_width(self) -> None:
+        # fillText maxWidth = w - 8
+        assert "maxWidth" in self.content or "w - 8" in self.content or "w-8" in self.content, (
+            "#draw() fillText must use maxWidth to truncate text labels"
+        )
+
+    # --- Visibility culling ---
+
+    def test_draw_culls_off_screen_spans(self) -> None:
+        # Cull condition: x + w < -10 or x > cw + 10
+        content = self.content
+        assert "continue" in content, (
+            "#draw() must use 'continue' to skip off-screen spans (visibility culling)"
+        )
+
+    def test_draw_cull_left_boundary(self) -> None:
+        # x + w < -10
+        assert "-10" in self.content, (
+            "#draw() must cull spans where x + w < -10 (off screen left)"
+        )
+
+    # --- Grid lines ---
+
+    def test_draw_draws_grid_lines(self) -> None:
+        assert "strokeStyle" in self.content, (
+            "#draw() must set strokeStyle for vertical grid lines"
+        )
+
+    def test_draw_grid_line_color(self) -> None:
+        assert "#21262d" in self.content, (
+            "#draw() grid lines must use #21262d stroke color"
+        )
+
+    def test_draw_calls_stroke(self) -> None:
+        assert "stroke()" in self.content, (
+            "#draw() must call stroke() to draw grid lines"
+        )
+
+    # --- ROW_H and SPAN_H constants ---
+
+    def test_row_h_constant_defined(self) -> None:
+        assert "ROW_H" in self.content, (
+            "Must define ROW_H constant for row height"
+        )
+
+    def test_span_h_constant_defined(self) -> None:
+        assert "SPAN_H" in self.content, (
+            "Must define SPAN_H constant for span bar height"
+        )
+
+    # --- _rowIndexMap / _visibleRows ---
+
+    def test_draw_uses_row_index_map(self) -> None:
+        assert "_rowIndexMap" in self.content, (
+            "#draw() must call _rowIndexMap() to build session-row mapping"
+        )
+
+    def test_draw_uses_visible_rows(self) -> None:
+        assert "_visibleRows" in self.content, (
+            "_rowIndexMap must use _visibleRows() to enumerate visible rows"
+        )
+
+    # --- Minimum 2px span width ---
+
+    def test_draw_enforces_min_2px_width(self) -> None:
+        content = self.content
+        assert "Math.max(2" in content or "Math.max( 2" in content, (
+            "#draw() must enforce minimum 2px span width with Math.max(2, ...)"
+        )
+
+    # --- Fallback color ---
+
+    def test_draw_has_fallback_color(self) -> None:
+        content = self.content
+        assert "#64748B" in content or "#64748b" in content, (
+            "#draw() must use '#64748B' as fallback span color"
+        )
+
+    # --- span.color usage ---
+
+    def test_draw_uses_span_color(self) -> None:
+        assert "span.color" in self.content, (
+            "#draw() must read span.color to get the span's color"
+        )
+
+    # --- rowMap skip collapsed ---
+
+    def test_draw_skips_undefined_rows(self) -> None:
+        # skip if rowMap lookup is undefined (collapsed session)
+        content = self.content
+        assert "undefined" in content or "=== undefined" in content or "rowMap.get" in content, (
+            "#draw() must skip spans whose session is not in rowMap (collapsed)"
+        )
+
+    # --- Canvas click / span-select ---
+
+    def test_on_canvas_click_dispatches_span_select(self) -> None:
+        assert "span-select" in self.content, (
+            "#onCanvasClick must dispatch 'span-select' CustomEvent on hit span"
+        )
+
+    def test_init_wires_span_select(self) -> None:
+        # init() wires span-select → sets state.selectedSpan and calls renderAll()
+        assert "span-select" in self.content, (
+            "init() must wire 'span-select' event to set state.selectedSpan and call renderAll()"
+        )
+
+    def test_init_sets_selected_span_on_span_select(self) -> None:
+        assert "state.selectedSpan" in self.content, (
+            "span-select handler must set state.selectedSpan"
+        )
+
+    # --- LLM span labels ---
+
+    def test_draw_llm_span_label_uses_model(self) -> None:
+        # LLM spans show model·cost
+        content = self.content
+        assert "model" in content, (
+            "#draw() must show model name in text labels for LLM spans"
+        )
+
+    def test_draw_tool_span_label_uses_tool_name(self) -> None:
+        assert "tool_name" in self.content, (
+            "#draw() must show tool_name in text labels for tool spans"
+        )
