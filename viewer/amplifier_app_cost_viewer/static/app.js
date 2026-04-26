@@ -21,6 +21,7 @@ import { html, render } from '/static/vendor/lit.all.min.js';
 const ZOOM_MIN    = 0.05;  // ms per pixel — most zoomed-in
 const ZOOM_MAX    = 200;   // ms per pixel — most zoomed-out
 const ROW_H       = 32;    // px per session row
+const RULER_H     = 28;    // px ruler strip height
 const SPAN_H      = 20;    // px span bar height
 const HEATMAP_H   = 20;    // px heatmap row height
 const IO_TRUNCATE = 500;   // chars before "show more"
@@ -402,6 +403,7 @@ class AcvTree extends HTMLElement {
 
     render(html`
       <style>${this.#styles()}</style>
+      <div class="ruler-spacer"></div>
       ${rows.map(({ node, depth, toggle, isActive, costPct }) => html`
         <div
           class=${'tree-row' + (isActive ? ' active' : '')}
@@ -434,6 +436,7 @@ class AcvTree extends HTMLElement {
         font-size: 12px;
         color: var(--text, #e6edf3);
       }
+      .ruler-spacer { height: ${RULER_H + HEATMAP_H}px; flex-shrink: 0; background: transparent; }
       .panel-placeholder {
         padding: 12px 8px;
         color: var(--text-muted, #8b949e);

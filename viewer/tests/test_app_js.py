@@ -1696,3 +1696,32 @@ def test_canvas_vertical_wheel_routes_to_tree(app_js_code: str) -> None:
     assert "scrollTop" in app_js_code, (
         "Canvas vertical wheel must update scrollTop to keep tree as scroll master"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Sidebar ruler gap (spacer div)
+# ---------------------------------------------------------------------------
+
+
+class TestTreeRulerSpacer:
+    """AcvTree must render a spacer div to align rows with timeline canvas rows."""
+
+    def test_ruler_h_constant_defined(self, app_js_code: str) -> None:
+        """RULER_H constant must be defined in the constants block."""
+        assert "RULER_H" in app_js_code, (
+            "app.js must define a RULER_H constant for the ruler height (28px)"
+        )
+
+    def test_tree_has_ruler_spacer_class(self, app_js_code: str) -> None:
+        """AcvTree must render a <div class='ruler-spacer'> before the rows."""
+        assert "ruler-spacer" in app_js_code, (
+            "AcvTree must include a 'ruler-spacer' div to offset tree rows "
+            "by the ruler + heatmap height so they align with timeline canvas rows"
+        )
+
+    def test_ruler_spacer_uses_flex_shrink_zero(self, app_js_code: str) -> None:
+        """The .ruler-spacer CSS must use flex-shrink: 0 so it doesn't collapse."""
+        assert "flex-shrink: 0" in app_js_code or "flex-shrink:0" in app_js_code, (
+            ".ruler-spacer must have 'flex-shrink: 0' so it keeps its height "
+            "and doesn't collapse in a flex container"
+        )
