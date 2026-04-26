@@ -230,7 +230,7 @@ function _extractContent(value) {
 function _renderToolInput(input) {
   if (input == null) return '\u2014';
   if (typeof input === 'string') return input;
-  if (typeof input === 'object') {
+  if (typeof input === 'object' && !Array.isArray(input)) {
     const lines = Object.entries(input)
       .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
     return lines.join('\n') || '\u2014';

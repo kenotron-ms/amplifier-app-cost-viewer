@@ -1783,39 +1783,34 @@ class TestAnimatedZoom:
 class TestHeatmapAreaGraph:
     """Verify the heatmap uses a Canvas-rendered filled area chart."""
 
-    def setup_method(self) -> None:
-        self.source = APP_JS.read_text()
-
-    def test_heatmap_uses_canvas_element(self) -> None:
+    def test_heatmap_uses_canvas_element(self, app_js_code: str) -> None:
         """Heatmap must use <canvas id='heatmap-canvas'> instead of a div."""
-        assert "heatmap-canvas" in self.source, (
+        assert "heatmap-canvas" in app_js_code, (
             "AcvTimeline must render <canvas id='heatmap-canvas'> "
             "instead of <div id='heatmap'>"
         )
 
-    def test_heatmap_has_gradient_fill(self) -> None:
+    def test_heatmap_has_gradient_fill(self, app_js_code: str) -> None:
         """Heatmap area chart must use createLinearGradient for the fill."""
-        assert "createLinearGradient" in self.source, (
+        assert "createLinearGradient" in app_js_code, (
             "#renderHeatmap must use createLinearGradient to fill the area chart"
         )
 
-    def test_heatmap_has_peak_marker(self) -> None:
+    def test_heatmap_has_peak_marker(self, app_js_code: str) -> None:
         """Heatmap must mark the peak bucket with amber (#f59e0b)."""
-        assert "f59e0b" in self.source, (
+        assert "f59e0b" in app_js_code, (
             "#renderHeatmap must draw an amber peak marker using colour #f59e0b"
         )
 
-    def test_heatmap_uses_float64_buckets(self) -> None:
+    def test_heatmap_uses_float64_buckets(self, app_js_code: str) -> None:
         """Cost bucketing must use Float64Array for numeric precision."""
-        assert "Float64Array" in self.source, (
+        assert "Float64Array" in app_js_code, (
             "#renderHeatmap must bucket span costs using Float64Array"
         )
 
-    def test_heatmap_uses_purple_gradient(self) -> None:
+    def test_heatmap_uses_purple_gradient(self, app_js_code: str) -> None:
         """Gradient fill must use Anthropic purple (rgb 123, 47, 190)."""
-        assert (
-            "123, 47, 190" in self.source or "7b2fbe" in self.source.lower()
-        ), (
+        assert "123, 47, 190" in app_js_code or "7b2fbe" in app_js_code.lower(), (
             "#renderHeatmap gradient must use Anthropic purple "
             "rgba(123, 47, 190, ...) or hex #7b2fbe"
         )
@@ -1829,54 +1824,51 @@ class TestHeatmapAreaGraph:
 class TestDetailPanelFormatting:
     """Tests for the beautiful detail panel helpers and layout."""
 
-    def setup_method(self) -> None:
-        self.source = APP_JS.read_text()
-
-    def test_detail_has_format_duration_helper(self) -> None:
+    def test_detail_has_format_duration_helper(self, app_js_code: str) -> None:
         """app.js must define _formatDuration() helper function."""
-        assert "_formatDuration" in self.source, (
+        assert "_formatDuration" in app_js_code, (
             "app.js must define _formatDuration() for human-readable durations "
             "(e.g. '342ms', '4.2s', '2m 15s')"
         )
 
-    def test_detail_has_extract_content_helper(self) -> None:
+    def test_detail_has_extract_content_helper(self, app_js_code: str) -> None:
         """app.js must define _extractContent() helper function."""
-        assert "_extractContent" in self.source, (
+        assert "_extractContent" in app_js_code, (
             "app.js must define _extractContent() to extract readable text "
             "from string, message array, or tool-use shapes"
         )
 
-    def test_detail_uses_locale_string_for_tokens(self) -> None:
+    def test_detail_uses_locale_string_for_tokens(self, app_js_code: str) -> None:
         """Token counts must use .toLocaleString() for comma-separated formatting."""
-        assert "toLocaleString" in self.source, (
+        assert "toLocaleString" in app_js_code, (
             "app.js must call .toLocaleString() on token counts so large numbers "
             "are formatted with commas (e.g. 12,345 instead of 12345)"
         )
 
-    def test_detail_has_render_tool_input_helper(self) -> None:
+    def test_detail_has_render_tool_input_helper(self, app_js_code: str) -> None:
         """app.js must define _renderToolInput() helper function."""
-        assert "_renderToolInput" in self.source, (
+        assert "_renderToolInput" in app_js_code, (
             "app.js must define _renderToolInput() to render tool input as "
             "'key: value' lines for objects, as-is for strings"
         )
 
-    def test_detail_handles_tool_use_output(self) -> None:
+    def test_detail_handles_tool_use_output(self, app_js_code: str) -> None:
         """_extractContent must handle tool_use type in content arrays."""
-        assert "tool_use" in self.source, (
+        assert "tool_use" in app_js_code, (
             "app.js must handle tool_use content type in _extractContent(), "
             "e.g. returning '[called: name]' for tool_use blocks"
         )
 
-    def test_detail_panel_has_stats_grid(self) -> None:
+    def test_detail_panel_has_stats_grid(self, app_js_code: str) -> None:
         """Detail panel must use a stats grid layout class."""
-        assert "detail-stats" in self.source or "stats-grid" in self.source, (
+        assert "detail-stats" in app_js_code or "stats-grid" in app_js_code, (
             "AcvDetail must use a .detail-stats or .stats-grid CSS class for "
             "a grid layout of span statistics"
         )
 
-    def test_detail_panel_uses_pre_wrap(self) -> None:
+    def test_detail_panel_uses_pre_wrap(self, app_js_code: str) -> None:
         """Detail panel I/O content must use white-space: pre-wrap."""
-        assert "pre-wrap" in self.source, (
+        assert "pre-wrap" in app_js_code, (
             "AcvDetail I/O content blocks must use white-space: pre-wrap "
             "to preserve line breaks in content display"
         )
