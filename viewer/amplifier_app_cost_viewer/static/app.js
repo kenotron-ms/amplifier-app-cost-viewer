@@ -8,8 +8,8 @@
 //   <acv-detail>    — span detail drawer (bottom panel)
 //
 // Each component owns its shadow DOM; global `state` is the single source of
-// truth.  Components call render() on themselves when state changes via the
-// notify() helper.
+// truth.  renderAll() triggers all components to re-render from state.
+// AcvToolbar dispatches CustomEvents; init() wires them to state mutations.
 // =============================================================================
 
 import { html, render } from '/static/vendor/lit.all.min.js';
@@ -39,6 +39,7 @@ const state = {
   selectedSpan:    null,  // span shown in the detail panel
   timeScale:       1,     // ms per pixel
   scrollLeft:      0,     // timeline horizontal scroll position (px)
+  hasMore:         false, // whether more sessions can be loaded
 };
 
 // =============================================================================
@@ -56,7 +57,15 @@ function notify() {
 }
 
 // =============================================================================
-// Section 3: API helpers
+// Section 3: renderAll — trigger all components to re-render
+// =============================================================================
+
+function renderAll() {
+  notify();
+}
+
+// =============================================================================
+// Section 4: API helpers
 // =============================================================================
 
 async function fetchSessions(offset = 0) {
@@ -68,6 +77,7 @@ async function fetchSessions(offset = 0) {
   } else {
     state.sessions = [...state.sessions, ...(data.sessions ?? [])];
   }
+  state.hasMore = data.has_more ?? false;
 }
 
 async function fetchSession(id) {
@@ -83,8 +93,66 @@ async function fetchSpans(id) {
 }
 
 // =============================================================================
-// Section 4: Custom element — AcvToolbar
+// Section 5: Helper functions
+// =============================================================================
+
+/**
+ * Format a duration in milliseconds as a human-readable string.
+ * < 1000 ms  → "123.4ms"
+ * < 60000 ms → "12.3s"
+ * else       → "2.1min"
+ */
+function _formatMs(ms) {
+  if (ms < 1000) return `${ms.toFixed(1)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60000).toFixed(1)}min`;
+}
+
+/**
+ * Format a token count as a compact string.
+ * >= 1000 → "12.3k"
+ * else    → "512"
+ */
+function _fmtTokens(n) {
+  if (!n) return '0';
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+/**
+ * Format a date string (ISO 8601) as a human-readable relative label.
+ * Today     → "Today"
+ * Yesterday → "Yesterday"
+ * else      → locale date string
+ */
+function _formatDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  const now = new Date();
+  const todayStr = now.toDateString();
+  const yesterdayStr = new Date(now - 86400000).toDateString();
+  if (d.toDateString() === todayStr) return 'Today';
+  if (d.toDateString() === yesterdayStr) return 'Yesterday';
+  return d.toLocaleDateString();
+}
+
+/**
+ * Escape a string for safe inclusion in HTML.
+ * Replaces &, <, >, " with their HTML entity equivalents.
+ */
+function _esc(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// =============================================================================
+// Section 6: Custom element — AcvToolbar
 // Session selector dropdown, zoom controls, total cost display, refresh button.
+// Dispatches CustomEvents for all user actions (session-change, zoom-in,
+// zoom-out, refresh, load-more) so that init() can wire them to state updates.
 // =============================================================================
 
 class AcvToolbar extends HTMLElement {
@@ -119,7 +187,7 @@ class AcvToolbar extends HTMLElement {
           font-size: 12px;
           color: var(--text, #e6edf3);
         }
-        .toolbar-title { font-weight: 600; }
+        .toolbar-title { font-weight: 600; margin-right: 4px; }
         select, button {
           background: var(--surface-alt, #21262d);
           color: var(--text, #e6edf3);
@@ -130,7 +198,12 @@ class AcvToolbar extends HTMLElement {
           font-size: 11px;
           cursor: pointer;
         }
+        select { max-width: 280px; }
         select:hover, button:hover { background: var(--border, #30363d); }
+        .cost-total { color: var(--text-muted, #8b949e); }
+        .cost-total strong { color: var(--accent, #58a6ff); }
+        .zoom-label { color: var(--text-muted, #8b949e); font-size: 10px; }
+        .spacer { flex: 1; }
       </style>
       <span class="toolbar-title">Amplifier Cost Viewer</span>
       <select @change=${e => this._onSelect(e)} aria-label="Select session">
@@ -138,38 +211,49 @@ class AcvToolbar extends HTMLElement {
           <option
             value=${s.session_id}
             ?selected=${s.session_id === state.activeSessionId}
-          >${s.session_id.slice(-8)} — $${(s.total_cost_usd || 0).toFixed(4)}</option>
+          >${s.session_id.slice(-8)} — ${_formatDate(s.created_at)} — $${(s.total_cost_usd || 0).toFixed(4)} — ${_fmtTokens(s.total_tokens || 0)} tok</option>
         `)}
+        ${state.hasMore ? html`<option value="__load_more__">Load more…</option>` : ''}
       </select>
       <span class="cost-total">Total: <strong>$${totalCost.toFixed(4)}</strong></span>
+      <span class="spacer"></span>
+      <span class="zoom-label">${state.timeScale.toFixed(1)} ms/px</span>
+      <button @click=${() => this._onZoomIn()} title="Zoom in">+</button>
+      <button @click=${() => this._onZoomOut()} title="Zoom out">−</button>
       <button @click=${() => this._onRefresh()} title="Refresh">↺</button>
     `, this._root);
   }
 
   _onSelect(e) {
-    loadSession(e.target.value).catch(err => {
-      console.error('Failed to switch session:', err);
-    });
+    const val = e.target.value;
+    if (val === '__load_more__') {
+      this.dispatchEvent(new CustomEvent('load-more', { bubbles: true, composed: true }));
+    } else {
+      this.dispatchEvent(new CustomEvent('session-change', {
+        bubbles: true,
+        composed: true,
+        detail: { id: val },
+      }));
+    }
   }
 
-  async _onRefresh() {
-    try {
-      await fetch('/api/refresh', { method: 'POST' });
-      await fetchSessions(0);
-      notify();
-      if (state.sessions.length > 0) {
-        await loadSession(state.sessions[0].session_id);
-      }
-    } catch (err) {
-      console.error('Refresh failed:', err);
-    }
+  _onZoomIn() {
+    this.dispatchEvent(new CustomEvent('zoom-in', { bubbles: true, composed: true }));
+  }
+
+  _onZoomOut() {
+    this.dispatchEvent(new CustomEvent('zoom-out', { bubbles: true, composed: true }));
+  }
+
+  _onRefresh() {
+    this.dispatchEvent(new CustomEvent('refresh', { bubbles: true, composed: true }));
   }
 }
 
 customElements.define('acv-toolbar', AcvToolbar);
 
 // =============================================================================
-// Section 5: Custom element — AcvTree
+// Section 7: Custom element — AcvTree  (shell)
 // Collapsible session / sub-agent tree in the left panel.
 // =============================================================================
 
@@ -272,7 +356,7 @@ class AcvTree extends HTMLElement {
 customElements.define('acv-tree', AcvTree);
 
 // =============================================================================
-// Section 6: Custom element — AcvTimeline
+// Section 8: Custom element — AcvTimeline  (shell)
 // Canvas-based Gantt / timeline showing spans per session row.
 // =============================================================================
 
@@ -334,7 +418,7 @@ class AcvTimeline extends HTMLElement {
 customElements.define('acv-timeline', AcvTimeline);
 
 // =============================================================================
-// Section 7: Custom element — AcvDetail
+// Section 9: Custom element — AcvDetail  (shell)
 // Detail drawer shown at the bottom when a span is selected.
 // =============================================================================
 
@@ -387,6 +471,7 @@ class AcvDetail extends HTMLElement {
         <div class="detail-section">
           <div>start: ${span.start_ms ?? 0}ms</div>
           <div>end: ${span.end_ms ?? 0}ms</div>
+          <div>duration: ${_formatMs((span.end_ms ?? 0) - (span.start_ms ?? 0))}</div>
           ${span.cost_usd != null ? html`<div>cost: $${span.cost_usd.toFixed(6)}</div>` : ''}
         </div>
       ` : html`<div class="placeholder" style="color:var(--text-muted,#8b949e);font-style:italic">Select a span to view details.</div>`}
@@ -403,13 +488,15 @@ class AcvDetail extends HTMLElement {
 customElements.define('acv-detail', AcvDetail);
 
 // =============================================================================
-// Section 8: loadSession helper
+// Section 10: loadSession helper
 // =============================================================================
 
 async function loadSession(id) {
   state.activeSessionId = id;
-  await fetchSession(id);
-  await fetchSpans(id);
+  state.selectedSpan = null;
+
+  // Fetch session data and spans in parallel
+  await Promise.all([fetchSession(id), fetchSpans(id)]);
 
   // Auto-expand root and first-level children
   state.expandedSessions.clear();
@@ -426,14 +513,65 @@ async function loadSession(id) {
   state.timeScale = maxEndMs / Math.max(viewWidth - 80, 400);
   state.scrollLeft = 0;
 
-  notify();
+  renderAll();
 }
 
 // =============================================================================
-// Section 9: init — entry point
+// Section 11: init — entry point
+// Wires toolbar CustomEvents to state mutations and kicks off initial data load.
 // =============================================================================
 
 async function init() {
+  const toolbar = document.querySelector('acv-toolbar');
+
+  // Wire: session-change → load the selected session
+  if (toolbar) {
+    toolbar.addEventListener('session-change', async e => {
+      try {
+        await loadSession(e.detail.id);
+      } catch (err) {
+        console.error('Failed to switch session:', err);
+      }
+    });
+
+    // Wire: zoom-in → decrease ms/px (zoom in = fewer ms per pixel)
+    toolbar.addEventListener('zoom-in', () => {
+      state.timeScale = Math.max(ZOOM_MIN, state.timeScale / 1.5);
+      renderAll();
+    });
+
+    // Wire: zoom-out → increase ms/px (zoom out = more ms per pixel)
+    toolbar.addEventListener('zoom-out', () => {
+      state.timeScale = Math.min(ZOOM_MAX, state.timeScale * 1.5);
+      renderAll();
+    });
+
+    // Wire: refresh → reload all data from server
+    toolbar.addEventListener('refresh', async () => {
+      try {
+        await fetch('/api/refresh', { method: 'POST' });
+        await fetchSessions(0);
+        renderAll();
+        if (state.sessions.length > 0) {
+          await loadSession(state.sessions[0].session_id);
+        }
+      } catch (err) {
+        console.error('Refresh failed:', err);
+      }
+    });
+
+    // Wire: load-more → fetch next page of sessions
+    toolbar.addEventListener('load-more', async () => {
+      try {
+        await fetchSessions(state.sessions.length);
+        renderAll();
+      } catch (err) {
+        console.error('Load more failed:', err);
+      }
+    });
+  }
+
+  // Initial data load
   try {
     await fetchSessions();
   } catch (err) {
@@ -441,7 +579,7 @@ async function init() {
     return;
   }
 
-  notify();
+  renderAll();
 
   if (state.sessions.length > 0) {
     try {

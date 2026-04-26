@@ -243,3 +243,281 @@ class TestAppJsInit:
         assert "init" in self.content, (
             "DOMContentLoaded listener must call init"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: API functions
+# ---------------------------------------------------------------------------
+
+
+class TestApiCalls:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_fetch_sessions_defined(self) -> None:
+        assert "async function fetchSessions" in self.content, (
+            "Must define 'async function fetchSessions'"
+        )
+
+    def test_fetch_sessions_api_endpoint(self) -> None:
+        assert "/api/sessions" in self.content, (
+            "fetchSessions must call /api/sessions endpoint"
+        )
+
+    def test_fetch_sessions_stores_to_state(self) -> None:
+        assert "state.sessions" in self.content, (
+            "fetchSessions must store results to state.sessions"
+        )
+
+    def test_fetch_sessions_checks_resp_ok(self) -> None:
+        assert "resp.ok" in self.content, (
+            "fetchSessions must check resp.ok"
+        )
+
+    def test_fetch_sessions_throws_on_error(self) -> None:
+        assert "throw new Error" in self.content, (
+            "fetchSessions must throw on HTTP error"
+        )
+
+    def test_fetch_sessions_appends_on_offset(self) -> None:
+        content = self.content
+        assert any(
+            pattern in content
+            for pattern in ["...state.sessions", "state.sessions.push", "state.sessions.concat"]
+        ), "fetchSessions must append (spread/push/concat) when offset > 0"
+
+    def test_fetch_session_defined(self) -> None:
+        assert "async function fetchSession(" in self.content, (
+            "Must define 'async function fetchSession(id)'"
+        )
+
+    def test_fetch_session_uses_encode_uri_component(self) -> None:
+        assert "encodeURIComponent" in self.content, (
+            "fetchSession must use encodeURIComponent for session id"
+        )
+
+    def test_fetch_session_stores_to_state(self) -> None:
+        assert "state.sessionData" in self.content, (
+            "fetchSession must store result to state.sessionData"
+        )
+
+    def test_fetch_spans_defined(self) -> None:
+        assert "async function fetchSpans(" in self.content, (
+            "Must define 'async function fetchSpans(id)'"
+        )
+
+    def test_fetch_spans_uses_spans_endpoint(self) -> None:
+        assert "/spans" in self.content, (
+            "fetchSpans must call /spans endpoint"
+        )
+
+    def test_fetch_spans_stores_to_state(self) -> None:
+        assert "state.spans" in self.content, (
+            "fetchSpans must store result to state.spans"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: helper functions
+# ---------------------------------------------------------------------------
+
+
+class TestHelpers:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_format_ms_defined(self) -> None:
+        assert "function _formatMs" in self.content, (
+            "Must define 'function _formatMs'"
+        )
+
+    def test_format_ms_uses_to_fixed_1(self) -> None:
+        assert "toFixed(1)" in self.content, (
+            "_formatMs must use toFixed(1) for formatting"
+        )
+
+    def test_format_ms_has_seconds_unit(self) -> None:
+        content = self.content
+        assert "'s'" in content or '"s"' in content or "`s`" in content or "/ 1000" in content, (
+            "_formatMs must handle seconds unit"
+        )
+
+    def test_format_ms_has_minutes_unit(self) -> None:
+        content = self.content
+        assert "'min'" in content or '"min"' in content or "/ 60" in content, (
+            "_formatMs must handle minutes unit"
+        )
+
+    def test_fmt_tokens_defined(self) -> None:
+        assert "function _fmtTokens" in self.content, (
+            "Must define 'function _fmtTokens'"
+        )
+
+    def test_format_date_defined(self) -> None:
+        assert "function _formatDate" in self.content, (
+            "Must define 'function _formatDate'"
+        )
+
+    def test_format_date_handles_today(self) -> None:
+        assert "Today" in self.content, (
+            "_formatDate must handle 'Today' case"
+        )
+
+    def test_format_date_handles_yesterday(self) -> None:
+        assert "Yesterday" in self.content, (
+            "_formatDate must handle 'Yesterday' case"
+        )
+
+    def test_esc_defined(self) -> None:
+        assert "function _esc" in self.content, (
+            "Must define 'function _esc'"
+        )
+
+    def test_esc_escapes_amp(self) -> None:
+        assert "&amp;" in self.content, (
+            "_esc must escape & as &amp;"
+        )
+
+    def test_esc_escapes_lt(self) -> None:
+        assert "&lt;" in self.content, (
+            "_esc must escape < as &lt;"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: AcvToolbar — full implementation
+# ---------------------------------------------------------------------------
+
+
+class TestAcvToolbar:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_renders_title(self) -> None:
+        assert "Amplifier Cost Viewer" in self.content, (
+            "AcvToolbar must render title 'Amplifier Cost Viewer'"
+        )
+
+    def test_renders_select(self) -> None:
+        assert "<select" in self.content, (
+            "AcvToolbar must render a <select> element"
+        )
+
+    def test_renders_option(self) -> None:
+        assert "<option" in self.content, (
+            "AcvToolbar must render <option> elements"
+        )
+
+    def test_has_load_more_sentinel(self) -> None:
+        assert "__load_more__" in self.content, (
+            "AcvToolbar must include __load_more__ sentinel option"
+        )
+
+    def test_dispatches_session_change_event(self) -> None:
+        assert "session-change" in self.content, (
+            "AcvToolbar must dispatch session-change CustomEvent"
+        )
+
+    def test_dispatches_zoom_in_event(self) -> None:
+        assert "zoom-in" in self.content, (
+            "AcvToolbar must dispatch zoom-in CustomEvent"
+        )
+
+    def test_dispatches_zoom_out_event(self) -> None:
+        assert "zoom-out" in self.content, (
+            "AcvToolbar must dispatch zoom-out CustomEvent"
+        )
+
+    def test_dispatches_refresh_event(self) -> None:
+        assert "CustomEvent" in self.content, (
+            "AcvToolbar must use CustomEvent for dispatching"
+        )
+        assert "dispatchEvent" in self.content, (
+            "AcvToolbar must call dispatchEvent"
+        )
+
+    def test_shows_total_cost(self) -> None:
+        assert "totalCost" in self.content, (
+            "AcvToolbar must show totalCost"
+        )
+
+    def test_shows_ms_px_zoom_label(self) -> None:
+        assert "ms/px" in self.content, (
+            "AcvToolbar must show ms/px zoom label"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: init wiring
+# ---------------------------------------------------------------------------
+
+
+class TestInitWiring:
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_render_all_defined(self) -> None:
+        assert "function renderAll" in self.content, (
+            "Must define 'function renderAll'"
+        )
+
+    def test_load_session_sets_active_session_id(self) -> None:
+        assert "state.activeSessionId" in self.content, (
+            "loadSession must set state.activeSessionId"
+        )
+
+    def test_load_session_calls_fetch_session(self) -> None:
+        assert "fetchSession(" in self.content, (
+            "loadSession must call fetchSession"
+        )
+
+    def test_load_session_calls_fetch_spans(self) -> None:
+        assert "fetchSpans(" in self.content, (
+            "loadSession must call fetchSpans"
+        )
+
+    def test_load_session_computes_time_scale(self) -> None:
+        assert "state.timeScale" in self.content, (
+            "loadSession must compute state.timeScale"
+        )
+
+    def test_init_fetches_sessions(self) -> None:
+        assert "fetchSessions" in self.content, (
+            "init must call fetchSessions"
+        )
+
+    def test_init_loads_first_session(self) -> None:
+        assert "sessions[0]" in self.content, (
+            "init must load sessions[0]"
+        )
+
+    def test_init_handles_errors(self) -> None:
+        content = self.content
+        assert ".catch(" in content or "try {" in content, (
+            "init must handle errors with catch"
+        )
+
+    def test_wires_session_change_event(self) -> None:
+        assert "session-change" in self.content, (
+            "init must wire session-change event listener"
+        )
+
+    def test_wires_zoom_in_event(self) -> None:
+        assert "zoom-in" in self.content, (
+            "init must wire zoom-in event listener"
+        )
+
+    def test_wires_zoom_out_event(self) -> None:
+        assert "zoom-out" in self.content, (
+            "init must wire zoom-out event listener"
+        )
+
+    def test_wires_refresh_event(self) -> None:
+        assert "refresh" in self.content, (
+            "init must wire refresh event listener"
+        )
+
+    def test_calls_api_refresh(self) -> None:
+        assert "/api/refresh" in self.content, (
+            "refresh handler must call /api/refresh"
+        )
