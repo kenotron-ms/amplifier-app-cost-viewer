@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -32,12 +33,26 @@ AMPLIFIER_HOME: Path = Path(
 
 _roots_cache: list[SessionNode] | None = None
 _loaded_cache: dict[str, SessionNode] = {}  # session_id → fully loaded root node
+_roots_lock = threading.Lock()  # prevents concurrent tree builds (prewarm + request)
 
 # ---------------------------------------------------------------------------
 # FastAPI application
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="Amplifier Cost Viewer", version="0.1.0")
+
+
+@app.on_event("startup")
+async def _prewarm_cache() -> None:
+    """Build the session cache in the background at startup.
+
+    Prevents the first /api/sessions request from blocking while
+    scanning thousands of session directories.
+    """
+    import asyncio
+
+    asyncio.create_task(asyncio.to_thread(_get_roots))
+
 
 # Conditionally mount static files when the directory exists
 _static_dir = Path(__file__).parent / "static"
@@ -128,11 +143,16 @@ def _flatten_spans(node: SessionNode, depth: int = 0) -> list[dict[str, Any]]:
 
 
 def _get_roots(force: bool = False) -> list[SessionNode]:
-    """Return cached root sessions, populating from disk on first call."""
+    """Return cached root sessions, populating from disk on first call.
+
+    Thread-safe: the lock prevents the prewarm background task and a
+    concurrent request handler from both running build_session_tree at once.
+    """
     global _roots_cache
-    if _roots_cache is None or force:
-        _roots_cache = build_session_tree(AMPLIFIER_HOME)
-    return _roots_cache
+    with _roots_lock:
+        if _roots_cache is None or force:
+            _roots_cache = build_session_tree(AMPLIFIER_HOME)
+        return _roots_cache
 
 
 def _find_root(session_id: str) -> SessionNode | None:

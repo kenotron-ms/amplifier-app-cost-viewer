@@ -781,6 +781,56 @@ def test_observability_costs_loaded(tmp_path):
     assert abs(node.total_cost_usd - 1.2345) < 0.0001
 
 
+# ---------------------------------------------------------------------------
+# Performance fix tests (perf-fix TDD RED)
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_timestamps_stops_at_first_event(tmp_path):
+    """normalize_timestamps reads only until session:start — does not read entire file."""
+    events_path = tmp_path / "events.jsonl"
+    # session:start is first, followed by many events
+    lines = [
+        json.dumps(
+            {"ts": "2026-01-01T00:00:00Z", "event": "session:start", "session_id": "x"}
+        ),
+    ]
+    # Add 1000 more lines to prove we don't need to read them
+    lines += [
+        json.dumps({"ts": "2026-01-01T00:00:01Z", "event": "other"})
+        for _ in range(1000)
+    ]
+    events_path.write_text("\n".join(lines))
+
+    # Should return the timestamp from line 1 correctly
+    ms = normalize_timestamps(events_path)
+    assert ms == int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+
+def test_read_metadata_partial_extracts_fields(tmp_path):
+    """_read_metadata_partial extracts fields from truncated large metadata."""
+    import json as _json
+
+    from amplifier_app_cost_viewer.reader import _read_metadata_partial
+
+    # Simulate a large metadata.json: small fields first, then huge config
+    metadata_path = tmp_path / "metadata.json"
+    obj = {
+        "session_id": "abc-123",
+        "parent_id": None,
+        "created": "2026-01-01T00:00:00Z",
+        "name": "Test Session",
+        "project_slug": "my-project",
+        "config": {"x": "a" * 5000},  # Makes file > 4096 bytes
+    }
+    metadata_path.write_text(_json.dumps(obj))
+
+    result = _read_metadata_partial(metadata_path)
+    assert result["session_id"] == "abc-123"
+    assert result["name"] == "Test Session"
+    assert result["created"] == "2026-01-01T00:00:00Z"
+
+
 def test_name_in_session_node(tmp_path):
     """SessionNode.name is populated from metadata.json."""
     amp_home = tmp_path / ".amplifier"

@@ -525,6 +525,14 @@ def test_session_list_includes_token_counts_from_observability(
     assert entry["total_output_tokens"] == 250
 
 
+def test_prewarm_handler_in_server():
+    """server.py has a startup prewarm handler."""
+    server_path = Path("amplifier_app_cost_viewer/server.py")
+    content = server_path.read_text()
+    assert "_prewarm_cache" in content or "prewarm" in content.lower()
+    assert "on_event" in content or "startup" in content
+
+
 def test_spans_loaded_on_session_detail(
     client: TestClient, amp_home: Path, monkeypatch
 ) -> None:

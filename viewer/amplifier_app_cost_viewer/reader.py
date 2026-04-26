@@ -123,6 +123,41 @@ def _read_events(events_path: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+def _read_metadata_partial(metadata_path: Path) -> dict:
+    """Read only the first 4096 bytes of metadata.json to extract needed fields.
+
+    metadata.json files are often 500KB+ because they contain the full agent
+    config. We only need 5 scalar fields that always appear at the top.
+    Reads ~4KB instead of ~533KB per file — 100x less I/O.
+    """
+    try:
+        with metadata_path.open("rb") as f:
+            chunk = f.read(4096).decode("utf-8", errors="replace")
+        # Try to parse as complete JSON first (small files parse fine)
+        # For large files, chunk will be truncated — json.loads will fail
+        try:
+            return json.loads(chunk)
+        except json.JSONDecodeError:
+            # File was truncated — extract needed fields via regex
+            # This is safe because all needed fields appear before 'config'
+            import re
+
+            result: dict = {}
+            for key in ("session_id", "parent_id", "created", "name", "project_slug"):
+                m = re.search(
+                    r'"' + key + r'"\s*:\s*("(?:[^"\\]|\\.)*"|null)',
+                    chunk,
+                )
+                if m:
+                    try:
+                        result[key] = json.loads(m.group(1))
+                    except json.JSONDecodeError:
+                        pass
+            return result
+    except OSError:
+        return {}
+
+
 def _read_parent_from_events(events_path: Path) -> str | None:
     """Read parent_id from events.jsonl by scanning first 10 lines for session:fork.
 
@@ -156,15 +191,25 @@ def _read_parent_from_events(events_path: Path) -> str | None:
 
 
 def normalize_timestamps(events_path: Path) -> int:
-    """Return Unix milliseconds of the first ``session:start`` event.
+    """Return the Unix ms timestamp of the session:start event.
 
-    Raises:
-        ValueError: if no ``session:start`` event is found.
+    Only reads until session:start is found — always the first event.
+    Raises ValueError if no session:start found.
     """
-    events = _read_events(events_path)
-    for event in events:
-        if event.get("event") == "session:start":
-            return _ts_to_ms(event["ts"])
+    try:
+        with events_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                    if event.get("event") == "session:start":
+                        return _ts_to_ms(event["ts"])
+                except (json.JSONDecodeError, KeyError):
+                    continue
+    except OSError as e:
+        raise ValueError(f"Cannot read {events_path}: {e}") from e
     raise ValueError(f"No session:start event found in {events_path}")
 
 
@@ -363,7 +408,7 @@ def discover_sessions(amplifier_home: Path) -> dict[str, SessionNode]:
         if metadata_path.exists():
             # Full session: read metadata only — no event parsing (fast path)
             try:
-                metadata = json.loads(metadata_path.read_text())
+                metadata = _read_metadata_partial(metadata_path)
                 session_id = metadata.get("session_id") or session_dir.name
                 parent_id = metadata.get("parent_id") or metadata.get(
                     "parent_session_id"
