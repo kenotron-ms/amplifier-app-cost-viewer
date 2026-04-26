@@ -4,7 +4,7 @@
 // Architecture:
 //   <acv-toolbar>   — session selector, zoom controls, cost summary
 //   <acv-tree>      — collapsible session / sub-agent tree (left panel)
-//   <acv-timeline>  — Gantt / canvas timeline (main panel)
+//   <acv-timeline>  — cost heatmap + ruler + canvas timeline (main panel)
 //   <acv-detail>    — span detail drawer (bottom panel)
 //
 // Each component owns its shadow DOM; global `state` is the single source of
@@ -146,6 +146,45 @@ function _esc(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// =============================================================================
+// Section 5b: Tree traversal helpers
+// =============================================================================
+
+/**
+ * Walk the session tree and return the list of visible nodes (respecting
+ * the expanded set).  A node is visible if it is the root, or its parent
+ * is expanded.
+ *
+ * @param {Object} node     - root session node (has .children array)
+ * @param {Set}    expanded - set of expanded session IDs
+ * @returns {Array}         - flat array of visible nodes in display order
+ */
+function _visibleRows(node, expanded) {
+  const rows = [];
+  function walk(n) {
+    rows.push(n);
+    if (expanded.has(n.session_id) && n.children?.length) {
+      for (const child of n.children) walk(child);
+    }
+  }
+  walk(node);
+  return rows;
+}
+
+/**
+ * Build a sessionId → rowIndex map for the visible rows.
+ *
+ * @param {Object} sessionData - root session node
+ * @param {Set}    expanded    - set of expanded session IDs
+ * @returns {Map}              - Map<sessionId, rowIndex>
+ */
+function _rowIndexMap(sessionData, expanded) {
+  const rows = _visibleRows(sessionData, expanded);
+  const map = new Map();
+  rows.forEach((n, i) => map.set(n.session_id, i));
+  return map;
 }
 
 // =============================================================================
@@ -385,7 +424,7 @@ class AcvTree extends HTMLElement {
     const sid = node.session_id;
     const hasChildren = (node.children?.length ?? 0) > 0;
     const isExpanded = expanded.has(sid);
-    const toggle = hasChildren ? (isExpanded ? '▾' : '▸') : ' ';
+    const toggle = hasChildren ? (isExpanded ? '▾' : '▸') : '\u00a0';
     const isActive = sid === activeId;
     const cost = node.total_cost_usd || 0;
     const costPct = maxCost > 0 ? (cost / maxCost) * 100 : 0;
@@ -418,62 +457,307 @@ class AcvTree extends HTMLElement {
 customElements.define('acv-tree', AcvTree);
 
 // =============================================================================
-// Section 8: Custom element — AcvTimeline  (shell)
-// Canvas-based Gantt / timeline showing spans per session row.
+// Section 8: Custom element — AcvTimeline  (full implementation)
+// Cost heatmap strip + time ruler + canvas area for spans.
 // =============================================================================
 
 class AcvTimeline extends HTMLElement {
+  // Private fields
+  #canvas = null;
+  #ctx    = null;
+  #rafId  = null;
+
   constructor() {
     super();
     this._root = this.attachShadow({ mode: 'open' });
   }
 
   connectedCallback() {
-    subscribe(() => this._render());
-    this._render();
+    subscribe(() => this.update());
+    this.update();
   }
 
-  _render() {
+  /** Called externally to push new data; schedules a RAF-debounced redraw. */
+  set data(value) {
+    this.update();
+    this.#scheduleRedraw();
+  }
+
+  /** Render the shadow DOM structure: heatmap, ruler, canvas-wrap. */
+  update() {
+    const spans   = state.spans;
+    const ts      = state.timeScale;
+    const scrollL = state.scrollLeft;
+
     render(html`
-      <style>
-        :host {
-          display: flex;
-          flex-direction: column;
-          flex: 1;
-          overflow: hidden;
-          min-width: 0;
-          position: relative;
-          background: var(--bg, #0d1117);
-          box-sizing: border-box;
-          font-family: "SF Mono", Consolas, Monaco, monospace;
-          font-size: 12px;
-        }
-        #time-ruler {
-          height: var(--ruler-height, 28px);
-          background: var(--surface, #161b22);
-          border-bottom: 1px solid var(--border, #30363d);
-          flex-shrink: 0;
-          overflow: hidden;
-        }
-        #gantt-rows {
-          flex: 1;
-          overflow-x: auto;
-          overflow-y: auto;
-          position: relative;
-        }
-        .placeholder {
-          padding: 12px 8px;
-          color: var(--text-muted, #8b949e);
-          font-style: italic;
-        }
-      </style>
-      <div id="time-ruler"></div>
-      <div id="gantt-rows">
-        ${state.spans.length === 0
-          ? html`<div class="placeholder">No spans to display.</div>`
-          : html`<!-- timeline rows rendered here -->`}
+      <style>${this.#styles()}</style>
+      <div id="heatmap"></div>
+      <div id="ruler" @wheel=${e => this.#onRulerWheel(e)}></div>
+      <div id="canvas-wrap">
+        <canvas></canvas>
       </div>
     `, this._root);
+
+    // After render, populate heatmap and ruler, then schedule canvas draw
+    this.#renderHeatmap(spans, ts, scrollL);
+    this.#renderRuler(spans, ts, scrollL);
+    this.#scheduleRedraw();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: canvas management
+  // ---------------------------------------------------------------------------
+
+  /** Find the canvas in shadow DOM, get 2D context, attach click listener. */
+  #ensureCanvas() {
+    const canvas = this._root.querySelector('canvas');
+    if (!canvas) return false;
+    if (this.#canvas !== canvas) {
+      this.#canvas = canvas;
+      this.#ctx = canvas.getContext('2d');
+      canvas.addEventListener('click', e => this.#onCanvasClick(e));
+    }
+    return true;
+  }
+
+  /** Resize canvas to match its CSS size, applying DPR scaling. */
+  #resizeCanvas() {
+    if (!this.#canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const wrap = this._root.querySelector('#canvas-wrap');
+    const w = wrap ? wrap.clientWidth  : this.clientWidth;
+    const h = wrap ? wrap.clientHeight : this.clientHeight;
+    this.#canvas.width  = Math.round(w * dpr);
+    this.#canvas.height = Math.round(h * dpr);
+    this.#canvas.style.width  = w + 'px';
+    this.#canvas.style.height = h + 'px';
+    if (this.#ctx) {
+      this.#ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+  }
+
+  /** Schedule a debounced redraw via requestAnimationFrame. */
+  #scheduleRedraw() {
+    if (this.#rafId) cancelAnimationFrame(this.#rafId);
+    this.#rafId = requestAnimationFrame(() => {
+      this.#rafId = null;
+      if (this.#ensureCanvas()) {
+        this.#resizeCanvas();
+        this.#draw();
+      }
+    });
+  }
+
+  /** Draw canvas content: clear background, render spans or placeholder. */
+  #draw() {
+    if (!this.#ctx || !this.#canvas) return;
+    const ctx = this.#ctx;
+    const w   = this.#canvas.width  / (window.devicePixelRatio || 1);
+    const h   = this.#canvas.height / (window.devicePixelRatio || 1);
+
+    // Clear to dark background
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, w, h);
+
+    if (!state.spans || state.spans.length === 0) {
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '12px "SF Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('No spans to display.', w / 2, h / 2);
+      return;
+    }
+
+    // Canvas Gantt rendering will be added in a future task
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: heatmap rendering
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Bucketize spans by cost into 4px-wide columns.
+   * Fills each column with Anthropic purple (rgba(123,47,190, opacity)).
+   * Marks the peak bucket with an amber border.
+   */
+  #renderHeatmap(spans, ts, scrollL) {
+    const el = this._root.querySelector('#heatmap');
+    if (!el) return;
+
+    if (!spans || spans.length === 0) {
+      el.innerHTML = '';
+      return;
+    }
+
+    const colW = 4; // px per bucket
+    const containerW = el.clientWidth || 800;
+    const numCols = Math.ceil(containerW / colW);
+    const buckets = new Float64Array(numCols);
+
+    for (const span of spans) {
+      const cost = span.cost_usd || 0;
+      if (cost <= 0) continue;
+      // Map the midpoint of the span to a pixel column
+      const midMs  = ((span.start_ms || 0) + (span.end_ms || 0)) / 2;
+      const px     = (midMs - scrollL) / ts;
+      const col    = Math.floor(px / colW);
+      if (col >= 0 && col < numCols) {
+        buckets[col] += cost;
+      }
+    }
+
+    // Find peak bucket for normalisation
+    let peak = 0;
+    let peakIdx = -1;
+    for (let i = 0; i < numCols; i++) {
+      if (buckets[i] > peak) { peak = buckets[i]; peakIdx = i; }
+    }
+
+    // Build HTML
+    let html = '';
+    for (let i = 0; i < numCols; i++) {
+      if (buckets[i] <= 0) continue;
+      const opacity = peak > 0 ? Math.max(0.08, buckets[i] / peak) : 0;
+      const isAmber = i === peakIdx;
+      const border  = isAmber ? 'border:1px solid #f59e0b;' : '';
+      html += `<div style="position:absolute;left:${i * colW}px;top:0;width:${colW}px;height:100%;background:rgba(123,47,190,${opacity.toFixed(3)});${border}box-sizing:border-box;"></div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: ruler rendering
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Compute nice tick intervals and render tick divs (tick-line + tick-label).
+   * Tick intervals: 500 / 5000 / 30000 / 60000 / 300000 / 900000 ms
+   */
+  #renderRuler(spans, ts, scrollL) {
+    const el = this._root.querySelector('#ruler');
+    if (!el) return;
+
+    const containerW = el.clientWidth || 800;
+
+    // Choose a tick interval so we get ~8–12 ticks across the view
+    const visibleMs = containerW * ts;
+    const INTERVALS = [500, 5000, 30000, 60000, 300000, 900000];
+    let interval = INTERVALS[INTERVALS.length - 1];
+    for (const iv of INTERVALS) {
+      if (visibleMs / iv <= 14) { interval = iv; break; }
+    }
+
+    // Compute start/end in ms
+    const startMs = scrollL * ts;
+    const endMs   = startMs + visibleMs;
+
+    // First tick at or after startMs
+    const firstTick = Math.ceil(startMs / interval) * interval;
+
+    let html = '';
+    for (let ms = firstTick; ms <= endMs; ms += interval) {
+      const px = (ms / ts) - scrollL;
+      if (px < 0 || px > containerW) continue;
+      html += `<div class="tick" style="left:${px.toFixed(1)}px;">` +
+        `<div class="tick-line"></div>` +
+        `<div class="tick-label">${_formatMs(ms)}</div>` +
+        `</div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: event handlers
+  // ---------------------------------------------------------------------------
+
+  /** Wheel on ruler: cursor-centred zoom. */
+  #onRulerWheel(e) {
+    e.preventDefault();
+
+    const el  = this._root.querySelector('#ruler');
+    const rect = el ? el.getBoundingClientRect() : { left: 0 };
+    const cursorPx = e.clientX - rect.left;
+
+    // Time at cursor before zoom
+    const msAtCursor = (cursorPx + state.scrollLeft) * state.timeScale;
+
+    // Zoom factor
+    const factor = e.deltaY > 0 ? 1.15 : 0.87;
+    state.timeScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, state.timeScale * factor));
+
+    // Adjust scrollLeft so the same ms stays under cursor
+    state.scrollLeft = Math.max(0, msAtCursor / state.timeScale - cursorPx);
+
+    renderAll();
+  }
+
+  /** Canvas click stub — will select spans in a future task. */
+  #onCanvasClick(e) {
+    // Stub: future implementation will pick span under cursor
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: styles
+  // ---------------------------------------------------------------------------
+
+  #styles() {
+    return `
+      :host {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        overflow: hidden;
+        min-width: 0;
+        position: relative;
+        background: var(--bg, #0d1117);
+        box-sizing: border-box;
+        font-family: "SF Mono", Consolas, Monaco, monospace;
+        font-size: 12px;
+      }
+      #heatmap {
+        height: 20px;
+        position: relative;
+        overflow: hidden;
+        flex-shrink: 0;
+        background: var(--bg, #0d1117);
+      }
+      #ruler {
+        height: 28px;
+        position: relative;
+        overflow: hidden;
+        flex-shrink: 0;
+        background: var(--surface, #161b22);
+        border-bottom: 1px solid var(--border, #30363d);
+        cursor: ew-resize;
+      }
+      .tick {
+        position: absolute;
+        top: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        transform: translateX(-50%);
+      }
+      .tick-line {
+        width: 1px;
+        height: 8px;
+        background: var(--border, #30363d);
+      }
+      .tick-label {
+        font-size: 10px;
+        color: var(--text-muted, #8b949e);
+        white-space: nowrap;
+        text-align: center;
+        margin-top: 2px;
+      }
+      #canvas-wrap {
+        flex: 1;
+        position: relative;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+      }
+    `;
   }
 }
 
@@ -580,6 +864,7 @@ async function loadSession(id) {
 // =============================================================================
 // Section 11: init — entry point
 // Wires toolbar CustomEvents to state mutations and kicks off initial data load.
+// Also wires keyboard shortcuts for zoom/pan.
 // =============================================================================
 
 async function init() {
@@ -652,6 +937,52 @@ async function init() {
       renderAll();
     });
   }
+
+  // ---------------------------------------------------------------------------
+  // Keyboard shortcuts: W/S zoom, A/D pan, Escape close detail
+  // Shift key gives 3× speed.  Skips when target is INPUT/SELECT/TEXTAREA.
+  // ---------------------------------------------------------------------------
+  document.addEventListener('keydown', e => {
+    const tag = e.target?.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+
+    const shift = e.shiftKey ? 3 : 1;
+
+    switch (e.code) {
+      case 'KeyW':
+      case 'Equal': // = key (zoom in)
+        e.preventDefault();
+        state.timeScale = Math.max(ZOOM_MIN, state.timeScale * Math.pow(0.7, shift));
+        renderAll();
+        break;
+
+      case 'KeyS':
+      case 'Minus': // - key (zoom out)
+        e.preventDefault();
+        state.timeScale = Math.min(ZOOM_MAX, state.timeScale * Math.pow(1.3, shift));
+        renderAll();
+        break;
+
+      case 'KeyA':
+      case 'ArrowLeft':
+        e.preventDefault();
+        state.scrollLeft = Math.max(0, state.scrollLeft - 150 * shift);
+        renderAll();
+        break;
+
+      case 'KeyD':
+      case 'ArrowRight':
+        e.preventDefault();
+        state.scrollLeft = state.scrollLeft + 150 * shift;
+        renderAll();
+        break;
+
+      case 'Escape':
+        state.selectedSpan = null;
+        renderAll();
+        break;
+    }
+  });
 
   // Initial data load
   try {

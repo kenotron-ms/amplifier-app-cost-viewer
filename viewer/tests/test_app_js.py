@@ -707,3 +707,266 @@ class TestAcvTree:
         assert "session-select" in self.content, (
             "init() must wire 'session-select' event listener on acv-tree"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: AcvTimeline — full implementation (heatmap + ruler + canvas)
+# ---------------------------------------------------------------------------
+
+
+class TestAcvTimeline:
+    """Tests for the full AcvTimeline custom element implementation."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    # --- Helper functions ---
+
+    def test_visible_rows_helper_defined(self) -> None:
+        assert "_visibleRows" in self.content, (
+            "Must define '_visibleRows(node, expanded)' helper"
+        )
+
+    def test_row_index_map_helper_defined(self) -> None:
+        assert "_rowIndexMap" in self.content, (
+            "Must define '_rowIndexMap(sessionData, expanded)' helper"
+        )
+
+    # --- Private fields ---
+
+    def test_canvas_private_field(self) -> None:
+        assert "#canvas" in self.content, (
+            "AcvTimeline must have '#canvas' private field"
+        )
+
+    def test_ctx_private_field(self) -> None:
+        assert "#ctx" in self.content, (
+            "AcvTimeline must have '#ctx' private field"
+        )
+
+    def test_raf_id_private_field(self) -> None:
+        assert "#rafId" in self.content, (
+            "AcvTimeline must have '#rafId' private field"
+        )
+
+    # --- connectedCallback and update ---
+
+    def test_connected_callback_calls_update(self) -> None:
+        # connectedCallback must call update()
+        assert "connectedCallback" in self.content, (
+            "AcvTimeline must define connectedCallback"
+        )
+
+    def test_update_method_defined(self) -> None:
+        assert "update()" in self.content, (
+            "AcvTimeline must define update() method"
+        )
+
+    # --- data setter ---
+
+    def test_data_setter_defined(self) -> None:
+        assert "set data(" in self.content, (
+            "AcvTimeline must define a 'data' setter"
+        )
+
+    # --- Private methods ---
+
+    def test_ensure_canvas_method_defined(self) -> None:
+        assert "#ensureCanvas" in self.content, (
+            "AcvTimeline must define '#ensureCanvas()' private method"
+        )
+
+    def test_resize_canvas_method_defined(self) -> None:
+        assert "#resizeCanvas" in self.content, (
+            "AcvTimeline must define '#resizeCanvas()' private method"
+        )
+
+    def test_draw_method_defined(self) -> None:
+        assert "#draw" in self.content, (
+            "AcvTimeline must define '#draw()' private method"
+        )
+
+    def test_render_heatmap_method_defined(self) -> None:
+        assert "#renderHeatmap" in self.content, (
+            "AcvTimeline must define '#renderHeatmap()' private method"
+        )
+
+    def test_render_ruler_method_defined(self) -> None:
+        assert "#renderRuler" in self.content, (
+            "AcvTimeline must define '#renderRuler()' private method"
+        )
+
+    def test_on_ruler_wheel_method_defined(self) -> None:
+        assert "#onRulerWheel" in self.content, (
+            "AcvTimeline must define '#onRulerWheel' event handler"
+        )
+
+    def test_on_canvas_click_method_defined(self) -> None:
+        assert "#onCanvasClick" in self.content, (
+            "AcvTimeline must define '#onCanvasClick' stub"
+        )
+
+    # --- Canvas element ---
+
+    def test_canvas_element_rendered(self) -> None:
+        assert "<canvas" in self.content, (
+            "AcvTimeline update() must render a <canvas> element"
+        )
+
+    # --- Heatmap ---
+
+    def test_heatmap_div_rendered(self) -> None:
+        assert "heatmap" in self.content, (
+            "AcvTimeline must render a heatmap div"
+        )
+
+    def test_heatmap_uses_anthropic_purple(self) -> None:
+        assert "rgba(123,47,190" in self.content or "rgba(123, 47, 190" in self.content, (
+            "AcvTimeline heatmap must use Anthropic purple rgba(123,47,190,...)"
+        )
+
+    def test_heatmap_height_20px(self) -> None:
+        assert "20px" in self.content, (
+            "AcvTimeline #heatmap must have 20px height"
+        )
+
+    def test_heatmap_peak_amber_border(self) -> None:
+        # amber border for peak bucket
+        assert "amber" in self.content or "#f59e0b" in self.content or "ffa" in self.content.lower() or "ffb" in self.content.lower(), (
+            "AcvTimeline #renderHeatmap must mark peak bucket with amber border"
+        )
+
+    # --- Ruler ---
+
+    def test_ruler_div_rendered(self) -> None:
+        assert "ruler" in self.content, (
+            "AcvTimeline must render a ruler div"
+        )
+
+    def test_ruler_height_28px(self) -> None:
+        assert "28px" in self.content, (
+            "AcvTimeline #ruler must have 28px height"
+        )
+
+    def test_ruler_has_border_bottom(self) -> None:
+        assert "border-bottom" in self.content, (
+            "AcvTimeline #ruler must have border-bottom"
+        )
+
+    def test_ruler_tick_interval_5000(self) -> None:
+        assert "5000" in self.content, (
+            "AcvTimeline #renderRuler must include 5000ms tick interval"
+        )
+
+    def test_ruler_tick_interval_30000(self) -> None:
+        assert "30000" in self.content, (
+            "AcvTimeline #renderRuler must include 30000ms tick interval"
+        )
+
+    def test_ruler_tick_interval_60000(self) -> None:
+        assert "60000" in self.content, (
+            "AcvTimeline #renderRuler must include 60000ms tick interval"
+        )
+
+    def test_tick_class_absolute_positioned(self) -> None:
+        assert ".tick" in self.content, (
+            "AcvTimeline must have .tick class with absolute positioning"
+        )
+
+    def test_tick_line_class(self) -> None:
+        assert "tick-line" in self.content, (
+            "AcvTimeline must have .tick-line class (1px wide, 8px tall)"
+        )
+
+    def test_tick_label_class(self) -> None:
+        assert "tick-label" in self.content, (
+            "AcvTimeline must have .tick-label class (10px font)"
+        )
+
+    # --- DPR scaling ---
+
+    def test_device_pixel_ratio_used(self) -> None:
+        assert "devicePixelRatio" in self.content, (
+            "AcvTimeline #resizeCanvas must use devicePixelRatio for DPR scaling"
+        )
+
+    # --- RAF debouncing ---
+
+    def test_request_animation_frame_used(self) -> None:
+        assert "requestAnimationFrame" in self.content, (
+            "AcvTimeline must use requestAnimationFrame for RAF debouncing"
+        )
+
+    # --- Wheel event ---
+
+    def test_wheel_event_handler(self) -> None:
+        assert "wheel" in self.content, (
+            "AcvTimeline ruler must have @wheel handler for cursor-centered zoom"
+        )
+
+    def test_wheel_prevent_default(self) -> None:
+        assert "preventDefault" in self.content, (
+            "AcvTimeline #onRulerWheel must call preventDefault()"
+        )
+
+    def test_wheel_ms_at_cursor(self) -> None:
+        assert "msAtCursor" in self.content, (
+            "AcvTimeline #onRulerWheel must compute msAtCursor for cursor-centered zoom"
+        )
+
+    # --- Canvas-wrap ---
+
+    def test_canvas_wrap_div(self) -> None:
+        assert "canvas-wrap" in self.content, (
+            "AcvTimeline must render #canvas-wrap div"
+        )
+
+    # --- Draw placeholder ---
+
+    def test_draw_clears_to_dark_background(self) -> None:
+        assert "#0d1117" in self.content, (
+            "AcvTimeline #draw() must clear canvas to #0d1117 background"
+        )
+
+    def test_draw_shows_no_spans_message(self) -> None:
+        assert "No spans" in self.content, (
+            "AcvTimeline #draw() must show 'No spans' message when empty"
+        )
+
+    # --- Keyboard shortcuts ---
+
+    def test_keyboard_shortcut_zoom_in_key_w(self) -> None:
+        assert "KeyW" in self.content or "'w'" in self.content or '"w"' in self.content, (
+            "init() must wire W key for zoom in"
+        )
+
+    def test_keyboard_shortcut_zoom_out_key_s(self) -> None:
+        assert "KeyS" in self.content or "'s'" in self.content or '"s"' in self.content, (
+            "init() must wire S key for zoom out"
+        )
+
+    def test_keyboard_shortcut_pan_left_key_a(self) -> None:
+        assert "KeyA" in self.content or "ArrowLeft" in self.content, (
+            "init() must wire A/ArrowLeft key for pan left"
+        )
+
+    def test_keyboard_shortcut_pan_right_key_d(self) -> None:
+        assert "KeyD" in self.content or "ArrowRight" in self.content, (
+            "init() must wire D/ArrowRight key for pan right"
+        )
+
+    def test_keyboard_shortcut_escape(self) -> None:
+        assert "Escape" in self.content, (
+            "init() must wire Escape key to clear selectedSpan"
+        )
+
+    def test_keyboard_shortcut_shift_modifier(self) -> None:
+        assert "shiftKey" in self.content or "Shift" in self.content, (
+            "init() keyboard shortcuts must support Shift modifier for 3x speed"
+        )
+
+    def test_keyboard_skips_input_elements(self) -> None:
+        content = self.content
+        assert "INPUT" in content or "SELECT" in content or "TEXTAREA" in content, (
+            "init() keyboard handler must skip when target is INPUT/SELECT/TEXTAREA"
+        )
