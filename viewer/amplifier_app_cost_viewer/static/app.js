@@ -40,6 +40,7 @@ const state = {
   timeScale:       1,     // ms per pixel
   scrollLeft:      0,     // timeline horizontal scroll position (px)
   hasMore:         false, // whether more sessions can be loaded
+  loading: false,          // true while fetchSession/fetchSpans in flight
 };
 
 // =============================================================================
@@ -62,6 +63,9 @@ function notify() {
 
 function renderAll() {
   notify();
+  // Push loading flag directly to timeline (so #draw() sees it before the RAF fires)
+  const _tl = document.querySelector('acv-timeline');
+  if (_tl) _tl.loading = state.loading;
 }
 
 // =============================================================================
@@ -243,9 +247,21 @@ class AcvToolbar extends HTMLElement {
         .cost-total strong { color: var(--accent, #58a6ff); }
         .zoom-label { color: var(--text-muted, #8b949e); font-size: 10px; }
         .spacer { flex: 1; }
+        .spinner {
+          display: inline-block;
+          width: 14px;
+          height: 14px;
+          border: 2px solid #30363d;
+          border-top-color: #58a6ff;
+          border-radius: 50%;
+          animation: spin 0.7s linear infinite;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
       </style>
       <span class="toolbar-title">Amplifier Cost Viewer</span>
-      <select @change=${e => this._onSelect(e)} aria-label="Select session">
+      <select @change=${e => this._onSelect(e)} aria-label="Select session" ?disabled=${state.loading}>
         ${state.sessions.map(s => html`
           <option
             value=${s.session_id}
@@ -260,6 +276,7 @@ class AcvToolbar extends HTMLElement {
       <button @click=${() => this._onZoomIn()} title="Zoom in">+</button>
       <button @click=${() => this._onZoomOut()} title="Zoom out">−</button>
       <button @click=${() => this._onRefresh()} title="Refresh">↺</button>
+      ${state.loading ? html`<span class="spinner" aria-label="Loading"></span>` : ''}
     `, this._root);
   }
 
@@ -463,9 +480,10 @@ customElements.define('acv-tree', AcvTree);
 
 class AcvTimeline extends HTMLElement {
   // Private fields
-  #canvas = null;
-  #ctx    = null;
-  #rafId  = null;
+  #canvas  = null;
+  #ctx     = null;
+  #rafId   = null;
+  #loading = false;
 
   constructor() {
     super();
@@ -480,6 +498,12 @@ class AcvTimeline extends HTMLElement {
   /** Called externally to push new data; schedules a RAF-debounced redraw. */
   set data(value) {
     this.update();
+    this.#scheduleRedraw();
+  }
+
+  /** Set loading state — shows overlay on canvas while true. */
+  set loading(v) {
+    this.#loading = !!v;
     this.#scheduleRedraw();
   }
 
@@ -569,6 +593,19 @@ class AcvTimeline extends HTMLElement {
     const ch      = this.#canvas.height / (window.devicePixelRatio || 1);
     const ts      = state.timeScale;
     const scrollL = state.scrollLeft;
+
+    // Loading overlay — shown while session data is being fetched
+    if (this.#loading) {
+      ctx.clearRect(0, 0, cw, ch);
+      ctx.fillStyle = '#0d1117';
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '14px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('Loading\u2026', cw / 2, ch / 2);
+      ctx.textAlign = 'left'; // reset
+      return;
+    }
 
     // 1. Resize is already done by #resizeCanvas before #draw is called.
 
@@ -1195,28 +1232,34 @@ customElements.define('acv-detail', AcvDetail);
 // =============================================================================
 
 async function loadSession(id) {
-  state.activeSessionId = id;
-  state.selectedSpan = null;
+  state.loading = true;
+  renderAll(); // immediately show loading state
 
-  // Fetch session data and spans in parallel
-  await Promise.all([fetchSession(id), fetchSpans(id)]);
+  try {
+    state.activeSessionId = id;
+    state.selectedSpan = null;
 
-  // Auto-expand root and first-level children
-  state.expandedSessions.clear();
-  state.expandedSessions.add(id);
-  if (state.sessionData?.children) {
-    for (const c of state.sessionData.children) {
-      state.expandedSessions.add(c.session_id);
+    // Fetch session data and spans in parallel
+    await Promise.all([fetchSession(id), fetchSpans(id)]);
+
+    // Auto-expand root and first-level children
+    state.expandedSessions.clear();
+    state.expandedSessions.add(id);
+    if (state.sessionData?.children) {
+      for (const c of state.sessionData.children) {
+        state.expandedSessions.add(c.session_id);
+      }
     }
+
+    // Compute initial timeScale to fit timeline in view
+    const maxEndMs = state.spans.reduce((m, s) => Math.max(m, s.end_ms || 0), 1);
+    const viewWidth = document.getElementById('timeline')?.clientWidth || 800;
+    state.timeScale = maxEndMs / Math.max(viewWidth - 80, 400);
+    state.scrollLeft = 0;
+  } finally {
+    state.loading = false;
+    renderAll();
   }
-
-  // Compute initial timeScale to fit timeline in view
-  const maxEndMs = state.spans.reduce((m, s) => Math.max(m, s.end_ms || 0), 1);
-  const viewWidth = document.getElementById('timeline')?.clientWidth || 800;
-  state.timeScale = maxEndMs / Math.max(viewWidth - 80, 400);
-  state.scrollLeft = 0;
-
-  renderAll();
 }
 
 // =============================================================================
@@ -1359,21 +1402,21 @@ async function init() {
   });
 
   // Initial data load
+  state.loading = true;
+  renderAll(); // immediately show loading state
+
   try {
     await fetchSessions();
-  } catch (err) {
-    console.error('Failed to fetch sessions:', err);
-    return;
-  }
+    renderAll();
 
-  renderAll();
-
-  if (state.sessions.length > 0) {
-    try {
+    if (state.sessions.length > 0) {
       await loadSession(state.sessions[0].session_id);
-    } catch (err) {
-      console.error('Failed to load session:', err);
     }
+  } catch (err) {
+    console.error('Failed to load initial data:', err);
+  } finally {
+    state.loading = false;
+    renderAll();
   }
 }
 

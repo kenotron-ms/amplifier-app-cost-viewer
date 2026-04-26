@@ -13,6 +13,7 @@ Tests verify that app.js:
 
 from __future__ import annotations
 
+import pytest
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -1513,3 +1514,66 @@ class TestTreeCanvasWiring:
         assert "state.selectedSpan = e.detail.span" in self.content, (
             "span-select handler must set state.selectedSpan = e.detail.span"
         )
+
+
+# ---------------------------------------------------------------------------
+# Fixture for loading-indicator tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def app_js_code() -> str:
+    return APP_JS.read_text()
+
+
+# ---------------------------------------------------------------------------
+# Tests: Loading indicator — spinner in toolbar + canvas overlay
+# ---------------------------------------------------------------------------
+
+
+def test_state_has_loading_field(app_js_code: str) -> None:
+    """state object must have loading: false"""
+    assert "loading: false" in app_js_code, (
+        "state must declare 'loading: false' field"
+    )
+
+
+def test_loading_set_in_load_session(app_js_code: str) -> None:
+    """loadSession must set state.loading = true before fetch"""
+    assert "state.loading = true" in app_js_code, (
+        "loadSession must set state.loading = true before fetching"
+    )
+
+
+def test_loading_cleared_in_finally(app_js_code: str) -> None:
+    """loading must be cleared in a finally block"""
+    assert "finally" in app_js_code, (
+        "loadSession (or init) must use a finally block to clear loading"
+    )
+    assert "state.loading = false" in app_js_code, (
+        "loading must be cleared with state.loading = false in a finally block"
+    )
+
+
+def test_spinner_css_in_toolbar(app_js_code: str) -> None:
+    """AcvToolbar shadow DOM must contain .spinner CSS"""
+    assert ".spinner" in app_js_code, (
+        "AcvToolbar styles must define a .spinner CSS class"
+    )
+    assert "border-radius: 50%" in app_js_code, (
+        "AcvToolbar .spinner must use border-radius: 50% to make a circle"
+    )
+
+
+def test_canvas_shows_loading_text(app_js_code: str) -> None:
+    """timeline draw() must render Loading text when loading"""
+    assert "Loading" in app_js_code, (
+        "AcvTimeline #draw() must render 'Loading' text when loading"
+    )
+    assert (
+        "this._loading" in app_js_code
+        or "this.#loading" in app_js_code
+        or "_loading" in app_js_code
+    ), (
+        "AcvTimeline must track loading state via this._loading or this.#loading"
+    )
