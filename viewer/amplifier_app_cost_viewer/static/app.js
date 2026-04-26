@@ -483,7 +483,7 @@ class AcvTimeline extends HTMLElement {
     this.#scheduleRedraw();
   }
 
-  /** Render the shadow DOM structure: heatmap, ruler, canvas-wrap. */
+  /** Render the shadow DOM structure: heatmap, ruler, canvas-wrap, detail panel. */
   update() {
     const spans   = state.spans;
     const ts      = state.timeScale;
@@ -496,12 +496,25 @@ class AcvTimeline extends HTMLElement {
       <div id="canvas-wrap">
         <canvas></canvas>
       </div>
+      <acv-detail
+        id="detail"
+        .data=${state.selectedSpan}
+        @detail-close=${e => this.#onDetailClose(e)}
+      ></acv-detail>
     `, this._root);
 
     // After render, populate heatmap and ruler, then schedule canvas draw
     this.#renderHeatmap(spans, ts, scrollL);
     this.#renderRuler(spans, ts, scrollL);
     this.#scheduleRedraw();
+  }
+
+  /** Re-dispatch 'detail-close' so it bubbles out of the timeline. */
+  #onDetailClose(_e) {
+    this.dispatchEvent(new CustomEvent('detail-close', {
+      bubbles:  true,
+      composed: true,
+    }));
   }
 
   // ---------------------------------------------------------------------------
@@ -940,8 +953,9 @@ class AcvTimeline extends HTMLElement {
 customElements.define('acv-timeline', AcvTimeline);
 
 // =============================================================================
-// Section 9: Custom element — AcvDetail  (shell)
+// Section 9: Custom element — AcvDetail  (full implementation)
 // Detail drawer shown at the bottom when a span is selected.
+// Shadow DOM component with timing, token, cost rows and I/O blocks.
 // =============================================================================
 
 class AcvDetail extends HTMLElement {
@@ -951,58 +965,219 @@ class AcvDetail extends HTMLElement {
   }
 
   connectedCallback() {
-    subscribe(() => this._render());
-    this._render();
+    subscribe(() => this.update());
+    this.update();
   }
 
-  _render() {
+  /** Property setter: called by AcvTimeline when selectedSpan changes. */
+  set data(v) {
+    this.update();
+  }
+
+  /** Main render method — renders nothing (hidden) when span is null. */
+  update() {
     const span = state.selectedSpan;
     render(html`
-      <style>
-        :host {
-          display: block;
-          background: var(--surface, #161b22);
-          border-top: 1px solid var(--border, #30363d);
-          min-height: var(--detail-height, 180px);
-          overflow-y: auto;
-          padding: 10px 14px;
-          box-sizing: border-box;
-          font-family: "SF Mono", Consolas, Monaco, monospace;
-          font-size: 12px;
-          color: var(--text, #e6edf3);
-        }
-        :host(.hidden) { display: none; }
-        .detail-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-        .detail-title { font-weight: 600; }
-        .detail-close {
-          background: none;
-          border: none;
-          color: var(--text-muted, #8b949e);
-          cursor: pointer;
-          font-size: 14px;
-          padding: 2px 4px;
-          border-radius: 3px;
-        }
-        .detail-close:hover { color: var(--text, #e6edf3); background: var(--surface-alt, #21262d); }
-      </style>
+      <style>${this.#styles()}</style>
       ${span ? html`
-        <div class="detail-header">
-          <span class="detail-title">${span.type || 'span'}: ${span.name || span.model || span.tool_name || ''}</span>
-          <button class="detail-close" @click=${() => this._close()}>✕</button>
+        <div class="panel">
+          <div class="header">
+            <span class="title">${this.#titleFor(span)}</span>
+            <button class="close-btn" @click=${() => this.#onClose()}>✕</button>
+          </div>
+          <div class="grid">
+            ${this.#timingRow(span)}
+            ${span.type === 'llm' || span.model ? this.#llmRows(span) : ''}
+            ${span.type === 'tool' ? this.#toolRows(span) : ''}
+          </div>
+          ${this.#ioBlock('INPUT', span.input)}
+          ${this.#ioBlock('OUTPUT', span.output)}
         </div>
-        <div class="detail-section">
-          <div>start: ${span.start_ms ?? 0}ms</div>
-          <div>end: ${span.end_ms ?? 0}ms</div>
-          ${span.cost_usd != null ? html`<div>cost: $${span.cost_usd.toFixed(6)}</div>` : ''}
-        </div>
-      ` : html`<div class="placeholder" style="color:var(--text-muted,#8b949e);font-style:italic">Select a span to view details.</div>`}
+      ` : html`<div class="hidden"></div>`}
     `, this._root);
   }
 
-  _close() {
-    state.selectedSpan = null;
-    this.classList.add('hidden');
-    notify();
+  // ---------------------------------------------------------------------------
+  // Private: title for the detail panel header
+  // ---------------------------------------------------------------------------
+
+  /** Returns the header title for a span based on its type. */
+  #titleFor(span) {
+    if (span.type === 'thinking') {
+      return html`<span style="color:#a78bfa">thinking</span>`;
+    }
+    if (span.type === 'tool') {
+      const ok    = span.success !== false;
+      const icon  = ok ? '✓' : '✗';
+      const color = ok ? '#3fb950' : '#f85149';
+      return html`${span.tool_name || 'tool'} <span style="color:${color}">${icon}</span>`;
+    }
+    // LLM span: provider/model
+    const parts = [span.provider, span.model].filter(Boolean);
+    return parts.join('/') || span.name || 'span';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: grid rows
+  // ---------------------------------------------------------------------------
+
+  /** Renders a timing row: start → end (duration) using _formatMs. */
+  #timingRow(span) {
+    const startMs  = span.start_ms || 0;
+    const endMs    = span.end_ms   || 0;
+    const duration = Math.max(0, endMs - startMs);
+    return html`
+      <span class="label">time</span>
+      <span class="value">${_formatMs(startMs)} → ${_formatMs(endMs)} (${_formatMs(duration)})</span>
+    `;
+  }
+
+  /** Renders LLM-specific rows: tokens, cache tokens (conditional), cost. */
+  #llmRows(span) {
+    const inputTok  = span.input_tokens  || 0;
+    const outputTok = span.output_tokens || 0;
+    const total     = inputTok + outputTok;
+    return html`
+      <span class="label">in tokens</span>  <span class="value">${inputTok}</span>
+      <span class="label">out tokens</span> <span class="value">${outputTok}</span>
+      ${span.cache_read_tokens  ? html`<span class="label">cache read</span>  <span class="value">${span.cache_read_tokens}</span>`  : ''}
+      ${span.cache_write_tokens ? html`<span class="label">cache write</span> <span class="value">${span.cache_write_tokens}</span>` : ''}
+      <span class="label">total tok</span>  <span class="value">${total}</span>
+      ${span.cost_usd != null ? html`<span class="label">cost</span> <span class="value">$${span.cost_usd.toFixed(6)}</span>` : ''}
+    `;
+  }
+
+  /** Renders tool-specific rows: duration and success indicator. */
+  #toolRows(span) {
+    const duration = _formatMs(Math.max(0, (span.end_ms || 0) - (span.start_ms || 0)));
+    const ok       = span.success !== false;
+    const icon     = ok ? '✓' : '✗';
+    const color    = ok ? '#3fb950' : '#f85149';
+    return html`
+      <span class="label">duration</span> <span class="value">${duration}</span>
+      <span class="label">success</span>  <span class="value" style="color:${color}">${icon}</span>
+    `;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: I/O blocks
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Renders an INPUT or OUTPUT block.
+   * - Stringifies non-string values with JSON.stringify
+   * - Truncates at IO_TRUNCATE chars with '…' suffix
+   * - Provides a 'show more' link that reveals the full text
+   */
+  #ioBlock(label, value) {
+    if (value == null) return '';
+    const str       = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    const truncated = str.length > IO_TRUNCATE;
+    const display   = truncated ? str.slice(0, IO_TRUNCATE) + '…' : str;
+
+    const handleShowMore = (e) => {
+      e.preventDefault();
+      const block = e.target.closest('.io-block');
+      const pre   = block?.querySelector('pre');
+      if (pre) pre.textContent = str;
+      e.target.remove();
+    };
+
+    return html`
+      <div class="io-block">
+        <div class="io-label">${label}</div>
+        <div class="io-content">
+          <pre>${display}</pre>
+          ${truncated ? html`<a class="show-more" href="#" @click=${handleShowMore}>show more</a>` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: close handler
+  // ---------------------------------------------------------------------------
+
+  /** Dispatches 'detail-close' event (bubbles + composed). */
+  #onClose() {
+    this.dispatchEvent(new CustomEvent('detail-close', {
+      bubbles:  true,
+      composed: true,
+    }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: styles
+  // ---------------------------------------------------------------------------
+
+  #styles() {
+    return `
+      :host { display: block; }
+      .hidden { display: none; }
+      .panel {
+        background: #161b22;
+        border-top: 1px solid var(--border, #30363d);
+        max-height: 40vh;
+        overflow-y: auto;
+        padding: 10px 14px;
+        box-sizing: border-box;
+        font-family: "SF Mono", Consolas, Monaco, monospace;
+        font-size: 12px;
+        color: var(--text, #e6edf3);
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+      }
+      .title { font-weight: 600; }
+      .close-btn {
+        background: none;
+        border: none;
+        color: var(--text-muted, #8b949e);
+        cursor: pointer;
+        font-size: 14px;
+        padding: 2px 4px;
+        border-radius: 3px;
+      }
+      .close-btn:hover { color: var(--text, #e6edf3); }
+      .grid {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 4px 12px;
+        margin-bottom: 10px;
+      }
+      .label { color: var(--text-muted, #8b949e); }
+      .io-block { margin-top: 8px; }
+      .io-label {
+        text-transform: uppercase;
+        font-size: 10px;
+        color: var(--text-muted, #8b949e);
+        margin-bottom: 4px;
+        letter-spacing: 0.05em;
+      }
+      .io-content pre {
+        margin: 0;
+        background: var(--surface-alt, #21262d);
+        padding: 6px 8px;
+        border-radius: 4px;
+        overflow: auto;
+        max-height: 80px;
+        white-space: pre-wrap;
+        word-break: break-all;
+        font-size: 11px;
+      }
+      .show-more {
+        display: inline-block;
+        margin-top: 4px;
+        color: var(--accent, #58a6ff);
+        font-size: 11px;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .show-more:hover { text-decoration: underline; }
+    `;
   }
 }
 
@@ -1114,12 +1289,18 @@ async function init() {
     });
   }
 
-  // Wire timeline events: span-select
+  // Wire timeline events: span-select and detail-close
   const timeline = document.querySelector('acv-timeline');
   if (timeline) {
     // Wire: span-select → set state.selectedSpan and call renderAll()
     timeline.addEventListener('span-select', e => {
       state.selectedSpan = e.detail.span;
+      renderAll();
+    });
+
+    // Wire: detail-close → clear state.selectedSpan and call renderAll()
+    timeline.addEventListener('detail-close', () => {
+      state.selectedSpan = null;
       renderAll();
     });
   }

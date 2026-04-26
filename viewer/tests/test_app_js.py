@@ -1158,3 +1158,313 @@ class TestCanvasDraw:
         assert "tool_name" in self.content, (
             "#draw() must show tool_name in text labels for tool spans"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: AcvDetail — span detail panel with I/O display
+# ---------------------------------------------------------------------------
+
+
+class TestAcvDetail:
+    """Tests for the full AcvDetail custom element implementation."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    # --- IO_TRUNCATE constant ---
+
+    def test_io_truncate_constant_defined(self) -> None:
+        assert "IO_TRUNCATE" in self.content, (
+            "Must define IO_TRUNCATE constant for I/O truncation"
+        )
+
+    def test_io_truncate_value_500(self) -> None:
+        assert "IO_TRUNCATE = 500" in self.content or "IO_TRUNCATE=500" in self.content, (
+            "IO_TRUNCATE must be set to 500 chars"
+        )
+
+    # --- update() / hidden when null ---
+
+    def test_update_renders_hidden_when_null(self) -> None:
+        content = self.content
+        # Must render hidden div (display:none or .hidden class) when span is null
+        assert "display:none" in content or "display: none" in content or ".hidden" in content, (
+            "AcvDetail update() must render hidden/display:none when span is null"
+        )
+
+    def test_update_uses_div_hidden(self) -> None:
+        # The spec requires div.hidden with display:none
+        assert "hidden" in self.content, (
+            "AcvDetail update() must use 'hidden' class for null span state"
+        )
+
+    # --- #titleFor() method ---
+
+    def test_title_for_method_defined(self) -> None:
+        assert "#titleFor" in self.content, (
+            "AcvDetail must define private #titleFor(span) method"
+        )
+
+    def test_title_for_returns_provider_model_for_llm(self) -> None:
+        # For LLM spans, returns provider/model
+        content = self.content
+        assert "provider" in content, (
+            "AcvDetail #titleFor must return provider/model for LLM spans"
+        )
+
+    def test_title_for_returns_tool_name_for_tool(self) -> None:
+        # For tool spans, returns tool_name with checkmark/cross
+        content = self.content
+        assert "tool_name" in content, (
+            "AcvDetail #titleFor must use tool_name for tool spans"
+        )
+
+    def test_title_for_tool_success_checkmark(self) -> None:
+        # checkmark (U+2713) for successful tool
+        assert "\u2713" in self.content or "checkmark" in self.content, (
+            "AcvDetail #titleFor must show checkmark for successful tool spans"
+        )
+
+    def test_title_for_tool_failure_cross(self) -> None:
+        # cross mark (U+2717) for failed tool
+        assert "\u2717" in self.content or "cross" in self.content, (
+            "AcvDetail #titleFor must show cross for failed tool spans"
+        )
+
+    def test_title_for_thinking_type_colored(self) -> None:
+        # For thinking type, shows colored 'thinking' label
+        assert "thinking" in self.content, (
+            "AcvDetail #titleFor must handle 'thinking' span type"
+        )
+
+    # --- #timingRow() method ---
+
+    def test_timing_row_method_defined(self) -> None:
+        assert "#timingRow" in self.content, (
+            "AcvDetail must define private #timingRow(span) method"
+        )
+
+    def test_timing_row_uses_format_ms(self) -> None:
+        # #timingRow uses _formatMs for formatting timing values
+        assert "_formatMs" in self.content, (
+            "AcvDetail #timingRow must use _formatMs for timing display"
+        )
+
+    def test_timing_row_shows_arrow_between_start_end(self) -> None:
+        # Shows start -> end (duration) with arrow character
+        content = self.content
+        assert "\u2192" in content or "->" in content, (
+            "AcvDetail #timingRow must show arrow between start and end time"
+        )
+
+    # --- #llmRows() method ---
+
+    def test_llm_rows_method_defined(self) -> None:
+        assert "#llmRows" in self.content, (
+            "AcvDetail must define private #llmRows(span) method"
+        )
+
+    def test_llm_rows_shows_input_tokens(self) -> None:
+        assert "input_tokens" in self.content, (
+            "AcvDetail #llmRows must show input_tokens"
+        )
+
+    def test_llm_rows_shows_output_tokens(self) -> None:
+        assert "output_tokens" in self.content, (
+            "AcvDetail #llmRows must show output_tokens"
+        )
+
+    def test_llm_rows_shows_cache_read_tokens_conditional(self) -> None:
+        # cache_read_tokens shown conditionally (only when > 0 or present)
+        assert "cache_read" in self.content, (
+            "AcvDetail #llmRows must conditionally show cache_read tokens"
+        )
+
+    def test_llm_rows_shows_cache_write_tokens_conditional(self) -> None:
+        # cache_write_tokens shown conditionally
+        assert "cache_write" in self.content, (
+            "AcvDetail #llmRows must conditionally show cache_write tokens"
+        )
+
+    def test_llm_rows_shows_cost_with_to_fixed_6(self) -> None:
+        # cost_usd shown with toFixed(6)
+        assert "toFixed(6)" in self.content, (
+            "AcvDetail #llmRows must show cost_usd with toFixed(6)"
+        )
+
+    # --- #toolRows() method ---
+
+    def test_tool_rows_method_defined(self) -> None:
+        assert "#toolRows" in self.content, (
+            "AcvDetail must define private #toolRows(span) method"
+        )
+
+    def test_tool_rows_shows_duration(self) -> None:
+        # Tool rows show duration
+        assert "#toolRows" in self.content and "duration" in self.content, (
+            "AcvDetail #toolRows must show duration"
+        )
+
+    def test_tool_rows_shows_success_indicator(self) -> None:
+        # Success indicator checkmark or cross
+        content = self.content
+        assert "\u2713" in content or "success" in content, (
+            "AcvDetail #toolRows must show success indicator"
+        )
+
+    # --- #ioBlock() method ---
+
+    def test_io_block_method_defined(self) -> None:
+        assert "#ioBlock" in self.content, (
+            "AcvDetail must define private #ioBlock(label, value) method"
+        )
+
+    def test_io_block_stringifies_non_string_values(self) -> None:
+        # Non-string values are JSON.stringify'd
+        assert "JSON.stringify" in self.content, (
+            "AcvDetail #ioBlock must JSON.stringify non-string values"
+        )
+
+    def test_io_block_truncates_at_io_truncate(self) -> None:
+        # Truncates at IO_TRUNCATE (500 chars)
+        content = self.content
+        assert "IO_TRUNCATE" in content and ("slice" in content or "substring" in content), (
+            "AcvDetail #ioBlock must truncate content at IO_TRUNCATE chars"
+        )
+
+    def test_io_block_slice_uses_io_truncate(self) -> None:
+        # slice(0, IO_TRUNCATE) specifically
+        content = self.content
+        assert "slice(0, IO_TRUNCATE)" in content or "slice(0,IO_TRUNCATE)" in content, (
+            "AcvDetail #ioBlock must use slice(0, IO_TRUNCATE) for truncation"
+        )
+
+    def test_io_block_adds_ellipsis_suffix(self) -> None:
+        # ellipsis suffix for truncated content (U+2026)
+        assert "\u2026" in self.content or "\\u2026" in self.content, (
+            "AcvDetail #ioBlock must add ellipsis suffix to truncated content"
+        )
+
+    def test_io_block_has_show_more_button(self) -> None:
+        # 'show more' button that replaces truncated text with full text
+        content = self.content
+        assert "show more" in content or "show-more" in content, (
+            "AcvDetail #ioBlock must provide a 'show more' button for truncated content"
+        )
+
+    # --- Close button and #onClose ---
+
+    def test_close_button_x_char(self) -> None:
+        # close button with X/times character (U+2715 or U+00D7)
+        content = self.content
+        assert "\u2715" in content or "\u00d7" in content or "close" in content.lower(), (
+            "AcvDetail must render a close button"
+        )
+
+    def test_on_close_method_defined(self) -> None:
+        assert "#onClose" in self.content, (
+            "AcvDetail must define private #onClose() method"
+        )
+
+    def test_on_close_dispatches_detail_close_event(self) -> None:
+        assert "detail-close" in self.content, (
+            "AcvDetail #onClose must dispatch 'detail-close' CustomEvent"
+        )
+
+    def test_on_close_event_bubbles_and_composed(self) -> None:
+        # The detail-close event must bubble and be composed
+        content = self.content
+        assert "bubbles" in content and "composed" in content, (
+            "AcvDetail #onClose 'detail-close' event must be bubbles:true and composed:true"
+        )
+
+    # --- Styles ---
+
+    def test_hidden_class_display_none(self) -> None:
+        # .hidden { display: none }
+        content = self.content
+        assert "display:none" in content or "display: none" in content, (
+            "AcvDetail styles must have display:none for hidden state"
+        )
+
+    def test_panel_class_background(self) -> None:
+        # .panel with background #161b22
+        assert "#161b22" in self.content, (
+            "AcvDetail .panel must have background #161b22"
+        )
+
+    def test_panel_class_max_height_40vh(self) -> None:
+        # .panel with max-height 40vh
+        assert "40vh" in self.content, (
+            "AcvDetail .panel must have max-height 40vh"
+        )
+
+    def test_panel_class_overflow_y_auto(self) -> None:
+        # .panel with overflow-y auto
+        assert "overflow-y" in self.content, (
+            "AcvDetail .panel must have overflow-y style"
+        )
+
+    def test_header_class_flex(self) -> None:
+        # .header with display flex
+        content = self.content
+        assert "header" in content and "flex" in content, (
+            "AcvDetail .header must use flex layout"
+        )
+
+    def test_grid_class_defined(self) -> None:
+        # .grid with grid template columns
+        assert ".grid" in self.content, (
+            "AcvDetail must define .grid CSS class with grid template columns"
+        )
+
+    def test_io_block_class_defined(self) -> None:
+        # .io-block class
+        assert "io-block" in self.content, (
+            "AcvDetail must define .io-block CSS class"
+        )
+
+    def test_io_label_class_uppercase(self) -> None:
+        # .io-label uppercase
+        assert "io-label" in self.content, (
+            "AcvDetail must define .io-label CSS class (uppercase)"
+        )
+
+    def test_io_content_pre_element(self) -> None:
+        # .io-content pre with max-height 80px overflow
+        assert "io-content" in self.content, (
+            "AcvDetail must define .io-content class with pre element"
+        )
+
+    def test_show_more_accent_color(self) -> None:
+        # .show-more link in accent color (#58a6ff or var(--accent))
+        content = self.content
+        assert "show-more" in content, (
+            "AcvDetail must define .show-more CSS class in accent color"
+        )
+
+    # --- Wiring into AcvTimeline ---
+
+    def test_acv_detail_element_in_timeline_update(self) -> None:
+        # AcvTimeline update() must include <acv-detail in its shadow DOM
+        assert "acv-detail" in self.content, (
+            "AcvTimeline update() must include <acv-detail> element"
+        )
+
+    def test_on_detail_close_method_in_timeline(self) -> None:
+        # AcvTimeline must define #onDetailClose method
+        assert "#onDetailClose" in self.content, (
+            "AcvTimeline must define #onDetailClose method"
+        )
+
+    def test_detail_close_wired_in_init(self) -> None:
+        # init() wires detail-close event on timeline
+        assert "detail-close" in self.content, (
+            "init() must wire 'detail-close' event listener on timeline"
+        )
+
+    def test_detail_close_sets_selected_span_null(self) -> None:
+        # detail-close handler sets state.selectedSpan = null
+        assert "state.selectedSpan" in self.content, (
+            "detail-close handler must set state.selectedSpan = null"
+        )
