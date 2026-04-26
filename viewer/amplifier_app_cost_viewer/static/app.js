@@ -17,6 +17,9 @@
 // Central state object — all UI reads from here, never from DOM.
 // ================================================================
 
+const ZOOM_MIN = 0.05;  // very zoomed in
+const ZOOM_MAX = 200;   // very zoomed out
+
 const state = {
   sessions: [],           // accumulated root-session summaries (grows with load more)
   sessionsOffset: 0,      // next offset to fetch (for load-more pagination)
@@ -83,16 +86,27 @@ function renderToolbar() {
       ${state.sessions.map(s => {
         const shortId = s.session_id.slice(0, 8);
         const nameStr = s.name ? `${s.name} (${shortId})` : shortId;
+        const cost = s.total_cost_usd || 0;
+        const inputTok = s.total_input_tokens || 0;
+        const outputTok = s.total_output_tokens || 0;
+        const tokStr = (inputTok + outputTok) > 0
+          ? ` (${_fmtTokens(inputTok + outputTok)} tok)`
+          : '';
         return `
         <option value="${s.session_id}"
           ${s.session_id === state.activeSessionId ? 'selected' : ''}>
-          ${nameStr} — ${_formatDate(s.start_ts)} — $${(s.total_cost_usd || 0).toFixed(4)}
+          ${nameStr} — ${_formatDate(s.start_ts)} — $${cost.toFixed(2)}${tokStr}
         </option>
         `;
       }).join('')}
     </select>
     <span class="cost-total">All sessions: <strong>${costStr}</strong></span>
     <button id="refresh-btn" title="Refresh session list">&#8635;</button>
+    <div class="zoom-controls">
+      <button id="zoom-out-btn" title="Zoom out">\u2212</button>
+      <span id="zoom-label">1\u00d7</span>
+      <button id="zoom-in-btn" title="Zoom in">+</button>
+    </div>
   `;
 
   // Append "Load more" sentinel option if the server has more sessions
@@ -138,6 +152,12 @@ function renderToolbar() {
       _showError(`Refresh failed: ${err.message}`);
     }
   });
+
+  // Zoom buttons
+  const zoomInBtn = document.getElementById('zoom-in-btn');
+  const zoomOutBtn = document.getElementById('zoom-out-btn');
+  if (zoomInBtn) zoomInBtn.addEventListener('click', () => _applyZoom(0.5, null));
+  if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => _applyZoom(2.0, null));
 }
 
 function _showError(msg) {
@@ -216,11 +236,16 @@ function _renderTreeNode(container, node, depth) {
   labelSpan.title = sessionId;
   row.appendChild(labelSpan);
 
-  // Session cost span — $X.XXXX of total_cost_usd
+  // Session cost span — $X.XX · Xtok
   const costSpan = document.createElement('span');
   costSpan.className = 'session-cost';
   const cost = node.total_cost_usd || 0;
-  costSpan.textContent = `$${cost.toFixed(4)}`;
+  const inputTok = node.total_input_tokens || 0;
+  const outputTok = node.total_output_tokens || 0;
+  const tok = inputTok + outputTok;
+  costSpan.textContent = tok > 0
+    ? `$${cost.toFixed(2)} \u00b7 ${_fmtTokens(tok)}`
+    : `$${cost.toFixed(4)}`;
   row.appendChild(costSpan);
 
   // Click handler — toggles expand/collapse, re-renders tree, scrolls Gantt
@@ -372,6 +397,24 @@ function renderGantt() {
       });
 
       g.appendChild(rect);
+
+      // Inline text label for wide bars (> 60px)
+      if (w > 60) {
+        const barLabel = _svgEl('text', {
+          x: x + 4,
+          y: SPAN_Y_OFF + 13,
+          fill: 'rgba(255,255,255,0.85)',
+          'font-size': 10,
+          'font-family': 'monospace',
+          'pointer-events': 'none',
+        });
+        if (span.type === 'llm' && (span.input_tokens || span.output_tokens)) {
+          barLabel.textContent = `$${(span.cost_usd||0).toFixed(3)} \u00b7 ${span.input_tokens||0}in/${span.output_tokens||0}out`;
+        } else if (span.type === 'tool') {
+          barLabel.textContent = `${span.tool_name || ''} \u00b7 ${_formatMs((span.end_ms||0)-(span.start_ms||0))}`;
+        }
+        g.appendChild(barLabel);
+      }
     });
 
     svg.appendChild(g);
@@ -404,17 +447,17 @@ function _renderRuler(container, maxEndMs, svgWidth) {
   });
   svg.appendChild(bg);
 
-  // Pick tick interval based on total duration: 5s/30s/1m/5m
+  // Pick tick interval based on visible time span, not total duration
+  const ganttPanel = document.getElementById('gantt-panel');
+  const visibleMs = (ganttPanel ? ganttPanel.clientWidth : 800) * (state.timeScale || 1);
+
   let tickInterval;
-  if (maxEndMs < 30000) {
-    tickInterval = 5000;      // 5s ticks for short sessions
-  } else if (maxEndMs < 120000) {
-    tickInterval = 30000;     // 30s ticks
-  } else if (maxEndMs < 600000) {
-    tickInterval = 60000;     // 1m ticks
-  } else {
-    tickInterval = 300000;    // 5m ticks for long sessions
-  }
+  if (visibleMs < 5000) tickInterval = 500;
+  else if (visibleMs < 30000) tickInterval = 5000;
+  else if (visibleMs < 120000) tickInterval = 30000;
+  else if (visibleMs < 600000) tickInterval = 60000;
+  else if (visibleMs < 3600000) tickInterval = 300000;
+  else tickInterval = 900000;
 
   const timeScale = state.timeScale || 1;
   for (let t = 0; t <= maxEndMs; t += tickInterval) {
@@ -458,6 +501,61 @@ function _formatMs(ms) {
   const minutes = Math.floor(ms / 60000);
   const seconds = Math.floor((ms % 60000) / 1000).toString().padStart(2, '0');
   return minutes + 'm' + seconds + 's';
+}
+
+
+function _fmtTokens(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(0) + 'k';
+  return String(n);
+}
+
+
+function _applyZoom(factor, cursorXPx) {
+  const ganttRows = document.getElementById('gantt-rows');
+  const oldScale = state.timeScale;
+  const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldScale * factor));
+  if (newScale === oldScale) return;
+
+  // If we have a cursor position, keep that point fixed on screen
+  let scrollAdjust = 0;
+  if (cursorXPx != null && ganttRows) {
+    const msAtCursor = cursorXPx * oldScale;
+    const newXPx = msAtCursor / newScale;
+    scrollAdjust = newXPx - cursorXPx;
+  }
+
+  state.timeScale = newScale;
+  renderGantt();  // re-render with new scale
+
+  // Restore scroll position adjusted for zoom
+  if (ganttRows && scrollAdjust !== 0) {
+    ganttRows.scrollLeft += scrollAdjust;
+  }
+
+  // Update zoom label: show as Xs or Xms per pixel
+  const label = document.getElementById('zoom-label');
+  if (label) {
+    const msPerPx = newScale;
+    if (msPerPx < 1) label.textContent = `${(1/msPerPx).toFixed(1)}px/ms`;
+    else label.textContent = `${msPerPx.toFixed(0)}ms/px`;
+  }
+}
+
+
+function _initGanttZoom() {
+  const ganttPanel = document.getElementById('gantt-panel');
+  if (!ganttPanel) return;
+  ganttPanel.addEventListener('wheel', e => {
+    if (!e.ctrlKey && !e.metaKey) return;  // only zoom with Ctrl/Cmd held
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 1.3 : (1 / 1.3);
+    // Zoom centered on cursor x position within gantt-rows
+    const ganttRows = document.getElementById('gantt-rows');
+    const rect = ganttRows ? ganttRows.getBoundingClientRect() : ganttPanel.getBoundingClientRect();
+    const cursorX = e.clientX - rect.left + (ganttRows ? ganttRows.scrollLeft : 0);
+    _applyZoom(factor, cursorX);
+  }, { passive: false });
 }
 
 
@@ -601,6 +699,7 @@ function _detailLlm(panel, span) {
       <div class="detail-row"><span class="detail-label">in</span> <span class="detail-value">${span.input_tokens != null ? _esc(span.input_tokens.toLocaleString()) : 'n/a'}</span></div>
       <div class="detail-row"><span class="detail-label">out</span> <span class="detail-value">${span.output_tokens != null ? _esc(span.output_tokens.toLocaleString()) : 'n/a'}</span></div>
       ${cacheHtml}
+      <div class="detail-row"><span class="detail-label">total</span> <span class="detail-value">${((span.input_tokens || 0) + (span.output_tokens || 0) + (span.cache_read_tokens || 0)).toLocaleString()} tok</span></div>
       <div class="detail-row"><span class="detail-label">cost</span> <span class="detail-value">${_esc(costStr)}</span></div>
     </div>
     ${_ioBlock('INPUT', span.input_text)}
@@ -777,6 +876,7 @@ async function init() {
 
   renderToolbar();
   initDetailResize();  // attach resize handle if panel is already visible
+  _initGanttZoom();   // wire scroll-wheel zoom on the Gantt panel
 
   if (state.sessions.length > 0) {
     try {

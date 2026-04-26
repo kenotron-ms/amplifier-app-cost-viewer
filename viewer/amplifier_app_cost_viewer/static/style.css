@@ -137,6 +137,37 @@ body {
   opacity: 0.8;
 }
 
+/* Zoom controls */
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.zoom-controls button {
+  background: var(--surface-alt, #1c2129);
+  border: 1px solid var(--border, #30363d);
+  color: var(--text, #e6edf3);
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.zoom-controls button:hover {
+  border-color: var(--accent, #58a6ff);
+}
+
+#zoom-label {
+  font-size: 11px;
+  color: var(--text-muted, #8b949e);
+  min-width: 48px;
+  text-align: center;
+  font-family: monospace;
+}
+
 /* ---------------------------------------------------------------------------
    Three-pane layout
    --------------------------------------------------------------------------- */
@@ -245,7 +276,7 @@ body {
 #gantt-rows {
   flex: 1;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   position: relative;
 }
 

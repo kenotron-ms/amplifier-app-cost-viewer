@@ -100,6 +100,8 @@ def _node_to_dict(node: SessionNode, include_spans: bool = False) -> dict[str, A
         "duration_ms": node.duration_ms,
         "cost_usd": node.cost_usd,
         "total_cost_usd": node.total_cost_usd,
+        "total_input_tokens": node.total_input_tokens,
+        "total_output_tokens": node.total_output_tokens,
         "child_count": len(node.children),
     }
     if include_spans:

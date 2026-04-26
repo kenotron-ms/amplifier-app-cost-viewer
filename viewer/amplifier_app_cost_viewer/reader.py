@@ -77,6 +77,8 @@ class SessionNode:
     children: list[SessionNode]
     name: str | None = None
     events_path: Path | None = field(default=None, compare=False, repr=False)
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -483,14 +485,15 @@ def _parse_all_spans(node: SessionNode, root_start_ms: int) -> None:
 
 def _read_observability_costs(
     amplifier_home: Path, session_ids: set[str]
-) -> dict[str, float]:
-    """Read pre-computed total_cost_usd from observability JSONL summaries.
+) -> dict[str, dict]:
+    """Read pre-computed totals from observability JSONL session_summary records.
 
     Fast: reads only the last line of each file (session_summary is always last).
-    Falls back to 0.0 for sessions without an observability file.
+    Returns {session_id: {"cost": float, "input_tokens": int, "output_tokens": int}}.
+    Falls back to an empty dict for sessions without an observability file.
     """
     obs_dir = amplifier_home / "observability"
-    costs: dict[str, float] = {}
+    costs: dict[str, dict] = {}
     if not obs_dir.exists():
         return costs
 
@@ -516,7 +519,11 @@ def _read_observability_costs(
             if last_line:
                 record = json.loads(last_line)
                 if record.get("type") == "session_summary":
-                    costs[file_sid] = float(record.get("total_cost_usd", 0.0))
+                    costs[file_sid] = {
+                        "cost": float(record.get("total_cost_usd", 0.0)),
+                        "input_tokens": int(record.get("total_input_tokens", 0)),
+                        "output_tokens": int(record.get("total_output_tokens", 0)),
+                    }
         except (OSError, json.JSONDecodeError, ValueError):
             continue
     return costs
@@ -552,8 +559,11 @@ def build_session_tree(amplifier_home: Path) -> list[SessionNode]:
     obs_costs = _read_observability_costs(amplifier_home, all_sids)
     for node in sessions.values():
         if node.session_id in obs_costs:
-            node.cost_usd = obs_costs[node.session_id]
-            node.total_cost_usd = obs_costs[node.session_id]
+            entry = obs_costs[node.session_id]
+            node.cost_usd = entry["cost"]
+            node.total_cost_usd = entry["cost"]
+            node.total_input_tokens = entry["input_tokens"]
+            node.total_output_tokens = entry["output_tokens"]
 
     # Stage 4: Aggregate costs — children roll up to parents
     for root in roots:
