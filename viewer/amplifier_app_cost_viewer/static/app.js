@@ -250,7 +250,7 @@ class AcvToolbar extends HTMLElement {
           <option
             value=${s.session_id}
             ?selected=${s.session_id === state.activeSessionId}
-          >${s.session_id.slice(-8)}${s.agent_name ? ` · ${s.agent_name}` : ''} — ${_formatDate(s.created_at)} — $${(s.total_cost_usd || 0).toFixed(4)} — ${_fmtTokens(s.total_tokens || 0)} tok</option>
+          >${s.session_id.slice(-8)}${s.name ? ` · ${s.name}` : ''} — ${_formatDate(s.start_ts)} — $${(s.total_cost_usd || 0).toFixed(4)} — ${_fmtTokens((s.total_input_tokens || 0) + (s.total_output_tokens || 0))} tok</option>
         `)}
         ${state.hasMore ? html`<option value="__load_more__">Load more…</option>` : ''}
       </select>
@@ -340,7 +340,7 @@ class AcvTree extends HTMLElement {
           <span class="session-label" title=${node.session_id}>
             ${node.name || node.agent_name || node.session_id.slice(-8)}
           </span>
-          <span class="session-cost">$${(node.total_cost_usd || 0).toFixed(4)}·${_fmtTokens(node.total_tokens || 0)}</span>
+          <span class="session-cost">$${(node.total_cost_usd || 0).toFixed(4)}·${_fmtTokens((node.total_input_tokens || 0) + (node.total_output_tokens || 0))}</span>
           <div class="cost-bar" style=${'width:' + costPct.toFixed(1) + '%'}></div>
         </div>
       `)}
