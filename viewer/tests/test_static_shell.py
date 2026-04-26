@@ -16,6 +16,8 @@ from __future__ import annotations
 from html.parser import HTMLParser
 from pathlib import Path
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -281,6 +283,16 @@ class TestStyleCssSpanColors:
 
     def test_unknown_color_present(self) -> None:
         assert "#F59E0B" in self.content or "#f59e0b" in self.content.lower()
+
+
+@pytest.fixture
+def static_html() -> str:
+    return INDEX_HTML.read_text()
+
+
+def test_no_acv_detail_in_body(static_html: str) -> None:
+    """acv-detail must NOT appear in index.html body — it lives in timeline shadow DOM only."""
+    assert "<acv-detail" not in static_html
 
 
 class TestStyleCssLayout:

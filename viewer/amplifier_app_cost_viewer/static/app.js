@@ -533,6 +533,11 @@ class AcvTimeline extends HTMLElement {
   #ctx     = null;
   #rafId   = null;
   #loading = false;
+  // Drag-to-pan state
+  #dragStartX = 0;
+  #dragStartScrollLeft = 0;
+  #isDragging = false;
+  #hasDragged = false;
 
   constructor() {
     super();
@@ -594,7 +599,7 @@ class AcvTimeline extends HTMLElement {
   // Private: canvas management
   // ---------------------------------------------------------------------------
 
-  /** Find the canvas in shadow DOM, get 2D context, attach click listener. */
+  /** Find the canvas in shadow DOM, get 2D context, attach click/drag listeners. */
   #ensureCanvas() {
     const canvas = this._root.querySelector('canvas');
     if (!canvas) return false;
@@ -602,6 +607,41 @@ class AcvTimeline extends HTMLElement {
       this.#canvas = canvas;
       this.#ctx = canvas.getContext('2d');
       canvas.addEventListener('click', e => this.#onCanvasClick(e));
+
+      // Drag-to-pan: mousedown starts drag
+      canvas.addEventListener('mousedown', e => {
+        if (e.button !== 0) return; // left button only
+        this.#dragStartX = e.clientX;
+        this.#dragStartScrollLeft = state.scrollLeft;
+        this.#isDragging = true;
+        this.#hasDragged = false;
+        canvas.style.cursor = 'grabbing';
+        e.preventDefault();
+      });
+
+      // Drag-to-pan: mousemove updates scrollLeft
+      canvas.addEventListener('mousemove', e => {
+        if (!this.#isDragging) return;
+        const delta = e.clientX - this.#dragStartX;
+        if (Math.abs(delta) > 4) this.#hasDragged = true;
+        if (this.#hasDragged) {
+          state.scrollLeft = Math.max(0, this.#dragStartScrollLeft - delta);
+          this.#draw();
+        }
+      });
+
+      // Drag-to-pan: stop drag on mouseup (suppress click if we dragged)
+      canvas.addEventListener('mouseup', e => {
+        if (this.#hasDragged) e.stopPropagation();
+        this.#isDragging = false;
+        canvas.style.cursor = 'grab';
+      });
+
+      // Drag-to-pan: stop drag on mouseleave to avoid stuck drag state
+      canvas.addEventListener('mouseleave', () => {
+        this.#isDragging = false;
+        canvas.style.cursor = 'grab';
+      });
     }
     return true;
   }
@@ -1031,6 +1071,7 @@ class AcvTimeline extends HTMLElement {
       }
       canvas {
         display: block;
+        cursor: grab;
       }
     `;
   }

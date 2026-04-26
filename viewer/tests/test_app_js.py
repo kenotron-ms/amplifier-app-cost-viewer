@@ -1602,3 +1602,29 @@ def test_ruler_starts_from_visible_window(app_js_code: str) -> None:
         "Ruler must compute scrollLeftMs = scrollLeft * timeScale so ticks "
         "start from the visible window, not from t=0"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Drag-to-pan on the timeline canvas
+# ---------------------------------------------------------------------------
+
+
+def test_drag_pan_mousedown_handler(app_js_code: str) -> None:
+    """Canvas must have drag-to-pan mousedown handler."""
+    assert "mousedown" in app_js_code
+    assert (
+        "dragStartX" in app_js_code
+        or "_dragStartX" in app_js_code
+        or "dragstart" in app_js_code.lower()
+    )
+
+
+def test_drag_pan_mousemove_handler(app_js_code: str) -> None:
+    """Canvas must have mousemove handler that updates scrollLeft."""
+    assert "mousemove" in app_js_code
+    assert "scrollLeft" in app_js_code
+
+
+def test_drag_pan_stops_on_mouseleave(app_js_code: str) -> None:
+    """Drag must stop on mouseleave to avoid stuck drag state."""
+    assert "mouseleave" in app_js_code
