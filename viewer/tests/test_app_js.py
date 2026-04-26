@@ -521,3 +521,189 @@ class TestInitWiring:
         assert "/api/refresh" in self.content, (
             "refresh handler must call /api/refresh"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: AcvTree — full implementation
+# ---------------------------------------------------------------------------
+
+
+class TestAcvTree:
+    """Tests for the full AcvTree custom element implementation."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    # --- tree-row elements ---
+
+    def test_tree_row_class_present(self) -> None:
+        assert "tree-row" in self.content, (
+            "AcvTree must render elements with class 'tree-row'"
+        )
+
+    # --- expand/collapse triangles ---
+
+    def test_expand_triangle_expanded(self) -> None:
+        # ▾ (U+25BE) for expanded nodes
+        assert "\u25be" in self.content or "▾" in self.content, (
+            "AcvTree must show ▾ triangle for expanded nodes"
+        )
+
+    def test_collapse_triangle_collapsed(self) -> None:
+        # ▸ (U+25B8) for collapsed nodes
+        assert "\u25b8" in self.content or "▸" in self.content, (
+            "AcvTree must show ▸ triangle for collapsed nodes"
+        )
+
+    # --- cost-bar inline bars ---
+
+    def test_cost_bar_class_present(self) -> None:
+        assert "cost-bar" in self.content, (
+            "AcvTree must render a div with class 'cost-bar' for proportional cost display"
+        )
+
+    def test_cost_bar_opacity(self) -> None:
+        assert "0.4" in self.content, (
+            "AcvTree cost-bar must use opacity 0.4 for the accent color"
+        )
+
+    # --- total_cost_usd display ---
+
+    def test_total_cost_usd_used(self) -> None:
+        assert "total_cost_usd" in self.content, (
+            "AcvTree must read total_cost_usd from session nodes"
+        )
+
+    # --- session-cost element ---
+
+    def test_session_cost_class_present(self) -> None:
+        assert "session-cost" in self.content, (
+            "AcvTree must render span with class 'session-cost' showing cost·tokens"
+        )
+
+    # --- toggle-expand custom event ---
+
+    def test_dispatches_toggle_expand_event(self) -> None:
+        assert "toggle-expand" in self.content, (
+            "AcvTree #onRowClick must dispatch 'toggle-expand' CustomEvent for nodes with children"
+        )
+
+    # --- session-select custom event ---
+
+    def test_dispatches_session_select_event(self) -> None:
+        assert "session-select" in self.content, (
+            "AcvTree #onRowClick must dispatch 'session-select' CustomEvent"
+        )
+
+    # --- expandedSessions usage ---
+
+    def test_uses_expanded_sessions(self) -> None:
+        assert "expandedSessions" in self.content, (
+            "AcvTree must use state.expandedSessions to track expanded nodes"
+        )
+
+    # --- session-label class ---
+
+    def test_session_label_class_present(self) -> None:
+        assert "session-label" in self.content, (
+            "AcvTree must render a span with class 'session-label'"
+        )
+
+    def test_session_label_shows_name_or_agent_name(self) -> None:
+        # session-label shows name||agent_name||shortId
+        assert "agent_name" in self.content, (
+            "AcvTree session-label must display name or agent_name or shortId"
+        )
+
+    # --- recursive children handling with depth ---
+
+    def test_handles_children_recursively(self) -> None:
+        assert "children" in self.content, (
+            "AcvTree must handle children nodes recursively"
+        )
+
+    def test_depth_based_indentation(self) -> None:
+        assert "depth" in self.content, (
+            "AcvTree must use depth parameter for indentation"
+        )
+
+    def test_depth_uses_12px_per_level(self) -> None:
+        # depth * 12px indentation
+        assert "12" in self.content, (
+            "AcvTree must indent tree rows by depth * 12px"
+        )
+
+    # --- #styles() private method ---
+
+    def test_styles_method_defined(self) -> None:
+        assert "#styles" in self.content, (
+            "AcvTree must define private #styles() method for shadow DOM CSS"
+        )
+
+    # --- update() public method ---
+
+    def test_update_method_defined(self) -> None:
+        assert "update()" in self.content, (
+            "AcvTree must define update() method to render from sessionData"
+        )
+
+    # --- #maxCostOf() private method ---
+
+    def test_max_cost_of_method_defined(self) -> None:
+        assert "maxCostOf" in self.content, (
+            "AcvTree must define #maxCostOf(node) to compute max cost across root and children"
+        )
+
+    # --- #flatten() recursive private method ---
+
+    def test_flatten_method_defined(self) -> None:
+        assert "#flatten" in self.content, (
+            "AcvTree must define private #flatten() recursive method for building tree rows"
+        )
+
+    # --- .toggle class with 14px width ---
+
+    def test_toggle_class_with_width(self) -> None:
+        assert ".toggle" in self.content, (
+            "AcvTree styles must define .toggle class with 14px width"
+        )
+
+    # --- active class for selected row ---
+
+    def test_active_class_for_selected_row(self) -> None:
+        assert "active" in self.content, (
+            "AcvTree must apply 'active' class to the currently selected session row"
+        )
+
+    # --- host styles ---
+
+    def test_host_has_border_right(self) -> None:
+        assert "border-right" in self.content, (
+            "AcvTree :host must have border-right style"
+        )
+
+    def test_host_has_monospace_font(self) -> None:
+        assert "monospace" in self.content, (
+            "AcvTree :host must use monospace font"
+        )
+
+    def test_host_background_color(self) -> None:
+        assert "#161b22" in self.content, (
+            "AcvTree :host must set background to #161b22"
+        )
+
+    # --- toggle-expand wired in init() ---
+
+    def test_toggle_expand_wired_in_init(self) -> None:
+        # init() must wire toggle-expand event to toggle expandedSessions
+        assert "toggle-expand" in self.content, (
+            "init() must wire 'toggle-expand' event listener on acv-tree"
+        )
+
+    # --- session-select wired in init() ---
+
+    def test_session_select_wired_in_init(self) -> None:
+        # init() must wire session-select event to call renderAll()
+        assert "session-select" in self.content, (
+            "init() must wire 'session-select' event listener on acv-tree"
+        )

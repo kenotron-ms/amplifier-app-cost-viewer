@@ -253,8 +253,9 @@ class AcvToolbar extends HTMLElement {
 customElements.define('acv-toolbar', AcvToolbar);
 
 // =============================================================================
-// Section 7: Custom element — AcvTree  (shell)
+// Section 7: Custom element — AcvTree  (full implementation)
 // Collapsible session / sub-agent tree in the left panel.
+// Dispatches toggle-expand and session-select CustomEvents; init() wires them.
 // =============================================================================
 
 class AcvTree extends HTMLElement {
@@ -264,92 +265,153 @@ class AcvTree extends HTMLElement {
   }
 
   connectedCallback() {
-    subscribe(() => this._render());
-    this._render();
+    subscribe(() => this.update());
+    this.update();
   }
 
-  _render() {
+  update() {
     if (!state.sessionData) {
       render(html`
-        <style>
-          :host { display: block; padding: 12px 8px; color: var(--text-muted, #8b949e); }
-        </style>
+        <style>${this.#styles()}</style>
         <div class="panel-placeholder">No session loaded.</div>
       `, this._root);
       return;
     }
 
-    const rows = this._flattenNodes(state.sessionData, 0);
+    const maxCost = this.#maxCostOf(state.sessionData);
+    const rows = [];
+    this.#flatten(
+      state.sessionData, 0,
+      state.expandedSessions,
+      maxCost,
+      state.activeSessionId,
+      rows
+    );
+
     render(html`
-      <style>
-        :host {
-          display: block;
-          width: var(--tree-width, 220px);
-          background: var(--surface, #161b22);
-          border-right: 1px solid var(--border, #30363d);
-          overflow-y: auto;
-          flex-shrink: 0;
-          box-sizing: border-box;
-          font-family: "SF Mono", Consolas, Monaco, monospace;
-          font-size: 12px;
-          color: var(--text, #e6edf3);
-        }
-        .tree-row {
-          display: flex;
-          align-items: center;
-          height: var(--row-height, 32px);
-          padding: 0 8px;
-          cursor: pointer;
-          user-select: none;
-          border-left: 2px solid transparent;
-        }
-        .tree-row:hover { background: var(--surface-alt, #21262d); }
-        .tree-row.active {
-          border-left-color: var(--accent, #58a6ff);
-          background: var(--surface-alt, #21262d);
-        }
-        .session-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .session-cost { color: var(--text-muted, #8b949e); font-size: 11px; margin-left: 4px; }
-      </style>
-      ${rows.map(({ node, depth }) => html`
+      <style>${this.#styles()}</style>
+      ${rows.map(({ node, depth, toggle, isActive, costPct }) => html`
         <div
-          class="tree-row ${node.session_id === state.activeSessionId ? 'active' : ''}"
-          @click=${() => this._onRowClick(node)}
+          class=${'tree-row' + (isActive ? ' active' : '')}
+          @click=${() => this.#onRowClick(node.session_id, (node.children?.length ?? 0) > 0)}
           data-session-id=${node.session_id}
+          style=${'padding-left:' + (depth * 12) + 'px'}
         >
-          <span style="display:inline-block;width:${depth * 12}px"></span>
-          <span class="session-toggle">
-            ${(node.children?.length ?? 0) > 0
-              ? (state.expandedSessions.has(node.session_id) ? '▾' : '▸')
-              : '\u00a0'}
-          </span>
+          <span class="toggle">${toggle}</span>
           <span class="session-label" title=${node.session_id}>
-            ${node.session_id.slice(-8)}${node.agent_name ? ` · ${node.agent_name}` : ''}
+            ${node.name || node.agent_name || node.session_id.slice(-8)}
           </span>
-          <span class="session-cost">$${(node.total_cost_usd || 0).toFixed(2)}</span>
+          <span class="session-cost">$${(node.total_cost_usd || 0).toFixed(4)}·${_fmtTokens(node.total_tokens || 0)}</span>
+          <div class="cost-bar" style=${'width:' + costPct.toFixed(1) + '%'}></div>
         </div>
       `)}
     `, this._root);
   }
 
-  _flattenNodes(node, depth) {
-    const rows = [{ node, depth }];
-    if (state.expandedSessions.has(node.session_id) && node.children?.length) {
-      for (const child of node.children) {
-        rows.push(...this._flattenNodes(child, depth + 1));
+  #styles() {
+    return `
+      :host {
+        display: block;
+        width: var(--tree-width, 220px);
+        background: #161b22;
+        border-right: 1px solid var(--border, #30363d);
+        overflow-y: auto;
+        flex-shrink: 0;
+        box-sizing: border-box;
+        font-family: "SF Mono", Consolas, Monaco, monospace;
+        font-size: 12px;
+        color: var(--text, #e6edf3);
       }
-    }
-    return rows;
+      .panel-placeholder {
+        padding: 12px 8px;
+        color: var(--text-muted, #8b949e);
+      }
+      .tree-row {
+        display: flex;
+        align-items: center;
+        height: 32px;
+        cursor: pointer;
+        user-select: none;
+        border-left: 2px solid transparent;
+        position: relative;
+        box-sizing: border-box;
+        padding-right: 8px;
+        overflow: hidden;
+      }
+      .tree-row:hover { background: var(--surface-alt, #21262d); }
+      .tree-row.active {
+        border-left-color: #58a6ff;
+        background: var(--surface-alt, #21262d);
+      }
+      .toggle {
+        width: 14px;
+        flex-shrink: 0;
+        text-align: center;
+        font-size: 10px;
+      }
+      .session-label {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .session-cost {
+        color: var(--text-muted, #8b949e);
+        font-size: 11px;
+        margin-left: 4px;
+        flex-shrink: 0;
+      }
+      .cost-bar {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        height: 3px;
+        background: #58a6ff;
+        opacity: 0.4;
+        pointer-events: none;
+      }
+    `;
   }
 
-  _onRowClick(node) {
-    const id = node.session_id;
-    if (state.expandedSessions.has(id)) {
-      state.expandedSessions.delete(id);
-    } else {
-      state.expandedSessions.add(id);
+  #maxCostOf(node) {
+    let max = node.total_cost_usd || 0;
+    for (const child of node.children ?? []) {
+      max = Math.max(max, this.#maxCostOf(child));
     }
-    notify();
+    return max;
+  }
+
+  #flatten(node, depth, expanded, maxCost, activeId, rows) {
+    const sid = node.session_id;
+    const hasChildren = (node.children?.length ?? 0) > 0;
+    const isExpanded = expanded.has(sid);
+    const toggle = hasChildren ? (isExpanded ? '▾' : '▸') : ' ';
+    const isActive = sid === activeId;
+    const cost = node.total_cost_usd || 0;
+    const costPct = maxCost > 0 ? (cost / maxCost) * 100 : 0;
+
+    rows.push({ node, depth, toggle, isActive, costPct });
+
+    if (isExpanded && hasChildren) {
+      for (const child of node.children) {
+        this.#flatten(child, depth + 1, expanded, maxCost, activeId, rows);
+      }
+    }
+  }
+
+  #onRowClick(sid, hasChildren) {
+    if (hasChildren) {
+      this.dispatchEvent(new CustomEvent('toggle-expand', {
+        bubbles: true,
+        composed: true,
+        detail: { id: sid },
+      }));
+    }
+    this.dispatchEvent(new CustomEvent('session-select', {
+      bubbles: true,
+      composed: true,
+      detail: { id: sid },
+    }));
   }
 }
 
@@ -567,6 +629,27 @@ async function init() {
       } catch (err) {
         console.error('Load more failed:', err);
       }
+    });
+  }
+
+  // Wire tree events: toggle-expand and session-select
+  const tree = document.querySelector('acv-tree');
+  if (tree) {
+    // Wire: toggle-expand → toggle expandedSessions set membership
+    tree.addEventListener('toggle-expand', e => {
+      const id = e.detail.id;
+      if (state.expandedSessions.has(id)) {
+        state.expandedSessions.delete(id);
+      } else {
+        state.expandedSessions.add(id);
+      }
+      renderAll();
+    });
+
+    // Wire: session-select → update activeSessionId and renderAll
+    tree.addEventListener('session-select', e => {
+      state.activeSessionId = e.detail.id;
+      renderAll();
     });
   }
 
