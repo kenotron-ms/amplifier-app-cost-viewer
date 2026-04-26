@@ -116,9 +116,7 @@ class TestAppJsState:
         )
 
     def test_state_has_selected_span(self) -> None:
-        assert "selectedSpan" in self.content, (
-            "state must have 'selectedSpan' property"
-        )
+        assert "selectedSpan" in self.content, "state must have 'selectedSpan' property"
 
     def test_state_has_time_scale(self) -> None:
         assert "timeScale" in self.content, "state must have 'timeScale' property"
@@ -240,9 +238,7 @@ class TestAppJsInit:
         )
 
     def test_dom_content_loaded_calls_init(self) -> None:
-        assert "init" in self.content, (
-            "DOMContentLoaded listener must call init"
-        )
+        assert "init" in self.content, "DOMContentLoaded listener must call init"
 
 
 # ---------------------------------------------------------------------------
@@ -270,9 +266,7 @@ class TestApiCalls:
         )
 
     def test_fetch_sessions_checks_resp_ok(self) -> None:
-        assert "resp.ok" in self.content, (
-            "fetchSessions must check resp.ok"
-        )
+        assert "resp.ok" in self.content, "fetchSessions must check resp.ok"
 
     def test_fetch_sessions_throws_on_error(self) -> None:
         assert "throw new Error" in self.content, (
@@ -283,7 +277,11 @@ class TestApiCalls:
         content = self.content
         assert any(
             pattern in content
-            for pattern in ["...state.sessions", "state.sessions.push", "state.sessions.concat"]
+            for pattern in [
+                "...state.sessions",
+                "state.sessions.push",
+                "state.sessions.concat",
+            ]
         ), "fetchSessions must append (spread/push/concat) when offset > 0"
 
     def test_fetch_session_defined(self) -> None:
@@ -307,9 +305,7 @@ class TestApiCalls:
         )
 
     def test_fetch_spans_uses_spans_endpoint(self) -> None:
-        assert "/spans" in self.content, (
-            "fetchSpans must call /spans endpoint"
-        )
+        assert "/spans" in self.content, "fetchSpans must call /spans endpoint"
 
     def test_fetch_spans_stores_to_state(self) -> None:
         assert "state.spans" in self.content, (
@@ -327,9 +323,7 @@ class TestHelpers:
         self.content = APP_JS.read_text()
 
     def test_format_ms_defined(self) -> None:
-        assert "function _formatMs" in self.content, (
-            "Must define 'function _formatMs'"
-        )
+        assert "function _formatMs" in self.content, "Must define 'function _formatMs'"
 
     def test_format_ms_uses_to_fixed_1(self) -> None:
         assert "toFixed(1)" in self.content, (
@@ -338,9 +332,12 @@ class TestHelpers:
 
     def test_format_ms_has_seconds_unit(self) -> None:
         content = self.content
-        assert "'s'" in content or '"s"' in content or "`s`" in content or "/ 1000" in content, (
-            "_formatMs must handle seconds unit"
-        )
+        assert (
+            "'s'" in content
+            or '"s"' in content
+            or "`s`" in content
+            or "/ 1000" in content
+        ), "_formatMs must handle seconds unit"
 
     def test_format_ms_has_minutes_unit(self) -> None:
         content = self.content
@@ -359,29 +356,19 @@ class TestHelpers:
         )
 
     def test_format_date_handles_today(self) -> None:
-        assert "Today" in self.content, (
-            "_formatDate must handle 'Today' case"
-        )
+        assert "Today" in self.content, "_formatDate must handle 'Today' case"
 
     def test_format_date_handles_yesterday(self) -> None:
-        assert "Yesterday" in self.content, (
-            "_formatDate must handle 'Yesterday' case"
-        )
+        assert "Yesterday" in self.content, "_formatDate must handle 'Yesterday' case"
 
     def test_esc_defined(self) -> None:
-        assert "function _esc" in self.content, (
-            "Must define 'function _esc'"
-        )
+        assert "function _esc" in self.content, "Must define 'function _esc'"
 
     def test_esc_escapes_amp(self) -> None:
-        assert "&amp;" in self.content, (
-            "_esc must escape & as &amp;"
-        )
+        assert "&amp;" in self.content, "_esc must escape & as &amp;"
 
     def test_esc_escapes_lt(self) -> None:
-        assert "&lt;" in self.content, (
-            "_esc must escape < as &lt;"
-        )
+        assert "&lt;" in self.content, "_esc must escape < as &lt;"
 
 
 # ---------------------------------------------------------------------------
@@ -399,14 +386,10 @@ class TestAcvToolbar:
         )
 
     def test_renders_select(self) -> None:
-        assert "<select" in self.content, (
-            "AcvToolbar must render a <select> element"
-        )
+        assert "<select" in self.content, "AcvToolbar must render a <select> element"
 
     def test_renders_option(self) -> None:
-        assert "<option" in self.content, (
-            "AcvToolbar must render <option> elements"
-        )
+        assert "<option" in self.content, "AcvToolbar must render <option> elements"
 
     def test_has_load_more_sentinel(self) -> None:
         assert "__load_more__" in self.content, (
@@ -419,9 +402,7 @@ class TestAcvToolbar:
         )
 
     def test_dispatches_zoom_in_event(self) -> None:
-        assert "zoom-in" in self.content, (
-            "AcvToolbar must dispatch zoom-in CustomEvent"
-        )
+        assert "zoom-in" in self.content, "AcvToolbar must dispatch zoom-in CustomEvent"
 
     def test_dispatches_zoom_out_event(self) -> None:
         assert "zoom-out" in self.content, (
@@ -432,19 +413,13 @@ class TestAcvToolbar:
         assert "CustomEvent" in self.content, (
             "AcvToolbar must use CustomEvent for dispatching"
         )
-        assert "dispatchEvent" in self.content, (
-            "AcvToolbar must call dispatchEvent"
-        )
+        assert "dispatchEvent" in self.content, "AcvToolbar must call dispatchEvent"
 
     def test_shows_total_cost(self) -> None:
-        assert "totalCost" in self.content, (
-            "AcvToolbar must show totalCost"
-        )
+        assert "totalCost" in self.content, "AcvToolbar must show totalCost"
 
     def test_shows_ms_px_zoom_label(self) -> None:
-        assert "ms/px" in self.content, (
-            "AcvToolbar must show ms/px zoom label"
-        )
+        assert "ms/px" in self.content, "AcvToolbar must show ms/px zoom label"
 
 
 # ---------------------------------------------------------------------------
@@ -457,9 +432,7 @@ class TestInitWiring:
         self.content = APP_JS.read_text()
 
     def test_render_all_defined(self) -> None:
-        assert "function renderAll" in self.content, (
-            "Must define 'function renderAll'"
-        )
+        assert "function renderAll" in self.content, "Must define 'function renderAll'"
 
     def test_load_session_sets_active_session_id(self) -> None:
         assert "state.activeSessionId" in self.content, (
@@ -467,14 +440,10 @@ class TestInitWiring:
         )
 
     def test_load_session_calls_fetch_session(self) -> None:
-        assert "fetchSession(" in self.content, (
-            "loadSession must call fetchSession"
-        )
+        assert "fetchSession(" in self.content, "loadSession must call fetchSession"
 
     def test_load_session_calls_fetch_spans(self) -> None:
-        assert "fetchSpans(" in self.content, (
-            "loadSession must call fetchSpans"
-        )
+        assert "fetchSpans(" in self.content, "loadSession must call fetchSpans"
 
     def test_load_session_computes_time_scale(self) -> None:
         assert "state.timeScale" in self.content, (
@@ -482,14 +451,10 @@ class TestInitWiring:
         )
 
     def test_init_fetches_sessions(self) -> None:
-        assert "fetchSessions" in self.content, (
-            "init must call fetchSessions"
-        )
+        assert "fetchSessions" in self.content, "init must call fetchSessions"
 
     def test_init_loads_first_session(self) -> None:
-        assert "sessions[0]" in self.content, (
-            "init must load sessions[0]"
-        )
+        assert "sessions[0]" in self.content, "init must load sessions[0]"
 
     def test_init_handles_errors(self) -> None:
         content = self.content
@@ -503,24 +468,16 @@ class TestInitWiring:
         )
 
     def test_wires_zoom_in_event(self) -> None:
-        assert "zoom-in" in self.content, (
-            "init must wire zoom-in event listener"
-        )
+        assert "zoom-in" in self.content, "init must wire zoom-in event listener"
 
     def test_wires_zoom_out_event(self) -> None:
-        assert "zoom-out" in self.content, (
-            "init must wire zoom-out event listener"
-        )
+        assert "zoom-out" in self.content, "init must wire zoom-out event listener"
 
     def test_wires_refresh_event(self) -> None:
-        assert "refresh" in self.content, (
-            "init must wire refresh event listener"
-        )
+        assert "refresh" in self.content, "init must wire refresh event listener"
 
     def test_calls_api_refresh(self) -> None:
-        assert "/api/refresh" in self.content, (
-            "refresh handler must call /api/refresh"
-        )
+        assert "/api/refresh" in self.content, "refresh handler must call /api/refresh"
 
 
 # ---------------------------------------------------------------------------
@@ -629,9 +586,7 @@ class TestAcvTree:
 
     def test_depth_uses_12px_per_level(self) -> None:
         # depth * 12px indentation
-        assert "12" in self.content, (
-            "AcvTree must indent tree rows by depth * 12px"
-        )
+        assert "12" in self.content, "AcvTree must indent tree rows by depth * 12px"
 
     # --- #styles() private method ---
 
@@ -683,14 +638,10 @@ class TestAcvTree:
         )
 
     def test_host_has_monospace_font(self) -> None:
-        assert "monospace" in self.content, (
-            "AcvTree :host must use monospace font"
-        )
+        assert "monospace" in self.content, "AcvTree :host must use monospace font"
 
     def test_host_background_color(self) -> None:
-        assert "#161b22" in self.content, (
-            "AcvTree :host must set background to #161b22"
-        )
+        assert "#161b22" in self.content, "AcvTree :host must set background to #161b22"
 
     # --- toggle-expand wired in init() ---
 
@@ -740,14 +691,10 @@ class TestAcvTimeline:
         )
 
     def test_ctx_private_field(self) -> None:
-        assert "#ctx" in self.content, (
-            "AcvTimeline must have '#ctx' private field"
-        )
+        assert "#ctx" in self.content, "AcvTimeline must have '#ctx' private field"
 
     def test_raf_id_private_field(self) -> None:
-        assert "#rafId" in self.content, (
-            "AcvTimeline must have '#rafId' private field"
-        )
+        assert "#rafId" in self.content, "AcvTimeline must have '#rafId' private field"
 
     # --- connectedCallback and update ---
 
@@ -758,16 +705,12 @@ class TestAcvTimeline:
         )
 
     def test_update_method_defined(self) -> None:
-        assert "update()" in self.content, (
-            "AcvTimeline must define update() method"
-        )
+        assert "update()" in self.content, "AcvTimeline must define update() method"
 
     # --- data setter ---
 
     def test_data_setter_defined(self) -> None:
-        assert "set data(" in self.content, (
-            "AcvTimeline must define a 'data' setter"
-        )
+        assert "set data(" in self.content, "AcvTimeline must define a 'data' setter"
 
     # --- Private methods ---
 
@@ -816,37 +759,32 @@ class TestAcvTimeline:
     # --- Heatmap ---
 
     def test_heatmap_div_rendered(self) -> None:
-        assert "heatmap" in self.content, (
-            "AcvTimeline must render a heatmap div"
-        )
+        assert "heatmap" in self.content, "AcvTimeline must render a heatmap div"
 
     def test_heatmap_uses_anthropic_purple(self) -> None:
-        assert "rgba(123,47,190" in self.content or "rgba(123, 47, 190" in self.content, (
-            "AcvTimeline heatmap must use Anthropic purple rgba(123,47,190,...)"
-        )
+        assert (
+            "rgba(123,47,190" in self.content or "rgba(123, 47, 190" in self.content
+        ), "AcvTimeline heatmap must use Anthropic purple rgba(123,47,190,...)"
 
     def test_heatmap_height_20px(self) -> None:
-        assert "20px" in self.content, (
-            "AcvTimeline #heatmap must have 20px height"
-        )
+        assert "20px" in self.content, "AcvTimeline #heatmap must have 20px height"
 
     def test_heatmap_peak_amber_border(self) -> None:
         # amber border for peak bucket
-        assert "amber" in self.content or "#f59e0b" in self.content or "ffa" in self.content.lower() or "ffb" in self.content.lower(), (
-            "AcvTimeline #renderHeatmap must mark peak bucket with amber border"
-        )
+        assert (
+            "amber" in self.content
+            or "#f59e0b" in self.content
+            or "ffa" in self.content.lower()
+            or "ffb" in self.content.lower()
+        ), "AcvTimeline #renderHeatmap must mark peak bucket with amber border"
 
     # --- Ruler ---
 
     def test_ruler_div_rendered(self) -> None:
-        assert "ruler" in self.content, (
-            "AcvTimeline must render a ruler div"
-        )
+        assert "ruler" in self.content, "AcvTimeline must render a ruler div"
 
     def test_ruler_height_28px(self) -> None:
-        assert "28px" in self.content, (
-            "AcvTimeline #ruler must have 28px height"
-        )
+        assert "28px" in self.content, "AcvTimeline #ruler must have 28px height"
 
     def test_ruler_has_border_bottom(self) -> None:
         assert "border-bottom" in self.content, (
@@ -917,9 +855,7 @@ class TestAcvTimeline:
     # --- Canvas-wrap ---
 
     def test_canvas_wrap_div(self) -> None:
-        assert "canvas-wrap" in self.content, (
-            "AcvTimeline must render #canvas-wrap div"
-        )
+        assert "canvas-wrap" in self.content, "AcvTimeline must render #canvas-wrap div"
 
     # --- Draw placeholder ---
 
@@ -936,14 +872,14 @@ class TestAcvTimeline:
     # --- Keyboard shortcuts ---
 
     def test_keyboard_shortcut_zoom_in_key_w(self) -> None:
-        assert "KeyW" in self.content or "'w'" in self.content or '"w"' in self.content, (
-            "init() must wire W key for zoom in"
-        )
+        assert (
+            "KeyW" in self.content or "'w'" in self.content or '"w"' in self.content
+        ), "init() must wire W key for zoom in"
 
     def test_keyboard_shortcut_zoom_out_key_s(self) -> None:
-        assert "KeyS" in self.content or "'s'" in self.content or '"s"' in self.content, (
-            "init() must wire S key for zoom out"
-        )
+        assert (
+            "KeyS" in self.content or "'s'" in self.content or '"s"' in self.content
+        ), "init() must wire S key for zoom out"
 
     def test_keyboard_shortcut_pan_left_key_a(self) -> None:
         assert "KeyA" in self.content or "ArrowLeft" in self.content, (
@@ -1016,9 +952,7 @@ class TestCanvasDraw:
 
     def test_draw_batches_by_color_map(self) -> None:
         # Batching uses a Map<color, rects[]> structure
-        assert "Map" in self.content, (
-            "#draw() must use a Map to batch spans by color"
-        )
+        assert "Map" in self.content, "#draw() must use a Map to batch spans by color"
 
     # --- Text labels on wide spans ---
 
@@ -1035,9 +969,11 @@ class TestCanvasDraw:
 
     def test_draw_text_label_uses_max_width(self) -> None:
         # fillText maxWidth = w - 8
-        assert "maxWidth" in self.content or "w - 8" in self.content or "w-8" in self.content, (
-            "#draw() fillText must use maxWidth to truncate text labels"
-        )
+        assert (
+            "maxWidth" in self.content
+            or "w - 8" in self.content
+            or "w-8" in self.content
+        ), "#draw() fillText must use maxWidth to truncate text labels"
 
     # --- Visibility culling ---
 
@@ -1074,9 +1010,7 @@ class TestCanvasDraw:
     # --- ROW_H and SPAN_H constants ---
 
     def test_row_h_constant_defined(self) -> None:
-        assert "ROW_H" in self.content, (
-            "Must define ROW_H constant for row height"
-        )
+        assert "ROW_H" in self.content, "Must define ROW_H constant for row height"
 
     def test_span_h_constant_defined(self) -> None:
         assert "SPAN_H" in self.content, (
@@ -1123,9 +1057,11 @@ class TestCanvasDraw:
     def test_draw_skips_undefined_rows(self) -> None:
         # skip if rowMap lookup is undefined (collapsed session)
         content = self.content
-        assert "undefined" in content or "=== undefined" in content or "rowMap.get" in content, (
-            "#draw() must skip spans whose session is not in rowMap (collapsed)"
-        )
+        assert (
+            "undefined" in content
+            or "=== undefined" in content
+            or "rowMap.get" in content
+        ), "#draw() must skip spans whose session is not in rowMap (collapsed)"
 
     # --- Canvas click / span-select ---
 
@@ -1179,18 +1115,20 @@ class TestAcvDetail:
         )
 
     def test_io_truncate_value_500(self) -> None:
-        assert "IO_TRUNCATE = 500" in self.content or "IO_TRUNCATE=500" in self.content, (
-            "IO_TRUNCATE must be set to 500 chars"
-        )
+        assert (
+            "IO_TRUNCATE = 500" in self.content or "IO_TRUNCATE=500" in self.content
+        ), "IO_TRUNCATE must be set to 500 chars"
 
     # --- update() / hidden when null ---
 
     def test_update_renders_hidden_when_null(self) -> None:
         content = self.content
         # Must render hidden div (display:none or .hidden class) when span is null
-        assert "display:none" in content or "display: none" in content or ".hidden" in content, (
-            "AcvDetail update() must render hidden/display:none when span is null"
-        )
+        assert (
+            "display:none" in content
+            or "display: none" in content
+            or ".hidden" in content
+        ), "AcvDetail update() must render hidden/display:none when span is null"
 
     def test_update_uses_div_hidden(self) -> None:
         # The spec requires div.hidden with display:none
@@ -1328,16 +1266,16 @@ class TestAcvDetail:
     def test_io_block_truncates_at_io_truncate(self) -> None:
         # Truncates at IO_TRUNCATE (500 chars)
         content = self.content
-        assert "IO_TRUNCATE" in content and ("slice" in content or "substring" in content), (
-            "AcvDetail #ioBlock must truncate content at IO_TRUNCATE chars"
-        )
+        assert "IO_TRUNCATE" in content and (
+            "slice" in content or "substring" in content
+        ), "AcvDetail #ioBlock must truncate content at IO_TRUNCATE chars"
 
     def test_io_block_slice_uses_io_truncate(self) -> None:
         # slice(0, IO_TRUNCATE) specifically
         content = self.content
-        assert "slice(0, IO_TRUNCATE)" in content or "slice(0,IO_TRUNCATE)" in content, (
-            "AcvDetail #ioBlock must use slice(0, IO_TRUNCATE) for truncation"
-        )
+        assert (
+            "slice(0, IO_TRUNCATE)" in content or "slice(0,IO_TRUNCATE)" in content
+        ), "AcvDetail #ioBlock must use slice(0, IO_TRUNCATE) for truncation"
 
     def test_io_block_adds_ellipsis_suffix(self) -> None:
         # ellipsis suffix for truncated content (U+2026)
@@ -1357,9 +1295,9 @@ class TestAcvDetail:
     def test_close_button_x_char(self) -> None:
         # close button with X/times character (U+2715 or U+00D7)
         content = self.content
-        assert "\u2715" in content or "\u00d7" in content or "close" in content.lower(), (
-            "AcvDetail must render a close button"
-        )
+        assert (
+            "\u2715" in content or "\u00d7" in content or "close" in content.lower()
+        ), "AcvDetail must render a close button"
 
     def test_on_close_method_defined(self) -> None:
         assert "#onClose" in self.content, (
@@ -1395,9 +1333,7 @@ class TestAcvDetail:
 
     def test_panel_class_max_height_40vh(self) -> None:
         # .panel with max-height 40vh
-        assert "40vh" in self.content, (
-            "AcvDetail .panel must have max-height 40vh"
-        )
+        assert "40vh" in self.content, "AcvDetail .panel must have max-height 40vh"
 
     def test_panel_class_overflow_y_auto(self) -> None:
         # .panel with overflow-y auto
@@ -1420,9 +1356,7 @@ class TestAcvDetail:
 
     def test_io_block_class_defined(self) -> None:
         # .io-block class
-        assert "io-block" in self.content, (
-            "AcvDetail must define .io-block CSS class"
-        )
+        assert "io-block" in self.content, "AcvDetail must define .io-block CSS class"
 
     def test_io_label_class_uppercase(self) -> None:
         # .io-label uppercase
@@ -1467,4 +1401,115 @@ class TestAcvDetail:
         # detail-close handler sets state.selectedSpan = null
         assert "state.selectedSpan" in self.content, (
             "detail-close handler must set state.selectedSpan = null"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Tree-Canvas wiring — expand/collapse integrated with Canvas draw
+# ---------------------------------------------------------------------------
+
+
+class TestTreeCanvasWiring:
+    """Verification tests for tree expand/collapse → canvas wiring.
+
+    The toggle-expand event handler in init() updates state.expandedSessions,
+    calls renderAll(), which triggers AcvTimeline.update() → #draw().
+    #draw() calls _rowIndexMap(state.sessionData, state.expandedSessions) to
+    build a session→rowIndex map, skipping collapsed session rows.
+    """
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    # --- toggle-expand wired in init ---
+
+    def test_toggle_expand_wired_in_init(self) -> None:
+        """init() must addEventListener for 'toggle-expand' on acv-tree."""
+        content = self.content
+        assert (
+            "addEventListener('toggle-expand'" in content
+            or 'addEventListener("toggle-expand"' in content
+        ), "init() must wire 'toggle-expand' event listener on acv-tree"
+
+    # --- expandedSessions.delete() called in toggle handler ---
+
+    def test_expanded_sessions_delete_called(self) -> None:
+        """toggle-expand handler calls expandedSessions.delete() to collapse a node."""
+        assert "expandedSessions.delete(" in self.content, (
+            "toggle-expand handler must call expandedSessions.delete() to collapse a node"
+        )
+
+    # --- expandedSessions.add() called in toggle handler ---
+
+    def test_expanded_sessions_add_called(self) -> None:
+        """toggle-expand handler calls expandedSessions.add() to expand a node."""
+        assert "expandedSessions.add(" in self.content, (
+            "toggle-expand handler must call expandedSessions.add() to expand a node"
+        )
+
+    # --- _visibleRows respects expanded via expanded.has() ---
+
+    def test_visible_rows_uses_expanded_has(self) -> None:
+        """_visibleRows calls expanded.has() to check if a node is expanded."""
+        assert "expanded.has(" in self.content, (
+            "_visibleRows must call expanded.has(session_id) to skip collapsed nodes"
+        )
+
+    # --- _rowIndexMap used in #draw with state.expandedSessions ---
+
+    def test_draw_calls_row_index_map_with_expanded_sessions(self) -> None:
+        """#draw() calls _rowIndexMap(state.sessionData, state.expandedSessions)."""
+        assert (
+            "_rowIndexMap(state.sessionData, state.expandedSessions)" in self.content
+        ), (
+            "#draw() must call _rowIndexMap(state.sessionData, state.expandedSessions) "
+            "to build a session-row mapping that respects expand/collapse state"
+        )
+
+    # --- collapsed sessions skip drawing (row === undefined) ---
+
+    def test_draw_skips_collapsed_sessions_undefined_check(self) -> None:
+        """#draw() skips spans where rowMap.get() returns undefined (collapsed session)."""
+        content = self.content
+        # rowIdx === undefined is the collapsed-session guard in #draw
+        assert "rowIdx === undefined" in content or "rowMap.get(" in content, (
+            "#draw() must check that rowIdx !== undefined before drawing "
+            "(collapsed sessions have no row, their spans must be skipped)"
+        )
+
+    # --- renderAll called after expandedSessions update ---
+
+    def test_render_all_called_after_expanded_sessions_update(self) -> None:
+        """toggle-expand handler updates expandedSessions then calls renderAll()."""
+        content = self.content
+        assert "expandedSessions" in content and "renderAll" in content, (
+            "toggle-expand handler must update state.expandedSessions then call renderAll() "
+            "so the canvas redraws immediately"
+        )
+
+    # --- renderAll passes expandedSessions through to #draw ---
+
+    def test_draw_reads_state_expanded_sessions(self) -> None:
+        """#draw() reads state.expandedSessions (passed via _rowIndexMap)."""
+        assert "state.expandedSessions" in self.content, (
+            "#draw() must read state.expandedSessions (passed to _rowIndexMap) "
+            "so collapsed rows are omitted from the canvas"
+        )
+
+    # --- detail-close wired in init ---
+
+    def test_detail_close_wired_in_init(self) -> None:
+        """init() wires 'detail-close' event listener on acv-timeline."""
+        content = self.content
+        assert (
+            "addEventListener('detail-close'" in content
+            or 'addEventListener("detail-close"' in content
+        ), "init() must wire 'detail-close' event listener on acv-timeline"
+
+    # --- state.selectedSpan set on span-select ---
+
+    def test_span_select_sets_state_selected_span(self) -> None:
+        """span-select handler sets state.selectedSpan = e.detail.span."""
+        assert "state.selectedSpan = e.detail.span" in self.content, (
+            "span-select handler must set state.selectedSpan = e.detail.span"
         )
