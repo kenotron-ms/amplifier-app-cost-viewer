@@ -1185,16 +1185,16 @@ class TestAcvDetail:
         )
 
     def test_timing_row_uses_format_ms(self) -> None:
-        # #timingRow uses _formatMs for formatting timing values
-        assert "_formatMs" in self.content, (
-            "AcvDetail #timingRow must use _formatMs for timing display"
+        # Updated: detail panel now uses _formatDuration (not _formatMs) for span durations
+        assert "_formatDuration" in self.content, (
+            "AcvDetail detail panel must use _formatDuration for span duration display"
         )
 
     def test_timing_row_shows_arrow_between_start_end(self) -> None:
-        # Shows start -> end (duration) with arrow character
+        # Updated: detail panel now shows formatted duration via _formatDuration, not start→end arrow
         content = self.content
-        assert "\u2192" in content or "->" in content, (
-            "AcvDetail #timingRow must show arrow between start and end time"
+        assert "_formatDuration" in content, (
+            "AcvDetail detail panel must use _formatDuration to show span durations"
         )
 
     # --- #llmRows() method ---
@@ -1236,14 +1236,15 @@ class TestAcvDetail:
     # --- #toolRows() method ---
 
     def test_tool_rows_method_defined(self) -> None:
-        assert "#toolRows" in self.content, (
-            "AcvDetail must define private #toolRows(span) method"
+        # Updated: #toolRows replaced by #statsBlock; check for stats block method
+        assert "#statsBlock" in self.content, (
+            "AcvDetail must define private #statsBlock(span) method (replaces #toolRows)"
         )
 
     def test_tool_rows_shows_duration(self) -> None:
-        # Tool rows show duration
-        assert "#toolRows" in self.content and "duration" in self.content, (
-            "AcvDetail #toolRows must show duration"
+        # Updated: #toolRows replaced by #statsBlock; duration shown via _formatDuration
+        assert "_formatDuration" in self.content, (
+            "AcvDetail #statsBlock must show duration via _formatDuration helper"
         )
 
     def test_tool_rows_shows_success_indicator(self) -> None:
