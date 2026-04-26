@@ -1769,3 +1769,49 @@ class TestAnimatedZoom:
             "app.js must use performance.now() in _animateZoom to measure "
             "elapsed animation time accurately"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Canvas-rendered spend area graph (heatmap)
+# ---------------------------------------------------------------------------
+
+
+class TestHeatmapAreaGraph:
+    """Verify the heatmap uses a Canvas-rendered filled area chart."""
+
+    def setup_method(self) -> None:
+        self.source = APP_JS.read_text()
+
+    def test_heatmap_uses_canvas_element(self) -> None:
+        """Heatmap must use <canvas id='heatmap-canvas'> instead of a div."""
+        assert "heatmap-canvas" in self.source, (
+            "AcvTimeline must render <canvas id='heatmap-canvas'> "
+            "instead of <div id='heatmap'>"
+        )
+
+    def test_heatmap_has_gradient_fill(self) -> None:
+        """Heatmap area chart must use createLinearGradient for the fill."""
+        assert "createLinearGradient" in self.source, (
+            "#renderHeatmap must use createLinearGradient to fill the area chart"
+        )
+
+    def test_heatmap_has_peak_marker(self) -> None:
+        """Heatmap must mark the peak bucket with amber (#f59e0b)."""
+        assert "f59e0b" in self.source, (
+            "#renderHeatmap must draw an amber peak marker using colour #f59e0b"
+        )
+
+    def test_heatmap_uses_float64_buckets(self) -> None:
+        """Cost bucketing must use Float64Array for numeric precision."""
+        assert "Float64Array" in self.source, (
+            "#renderHeatmap must bucket span costs using Float64Array"
+        )
+
+    def test_heatmap_uses_purple_gradient(self) -> None:
+        """Gradient fill must use Anthropic purple (rgb 123, 47, 190)."""
+        assert (
+            "123, 47, 190" in self.source or "7b2fbe" in self.source.lower()
+        ), (
+            "#renderHeatmap gradient must use Anthropic purple "
+            "rgba(123, 47, 190, ...) or hex #7b2fbe"
+        )

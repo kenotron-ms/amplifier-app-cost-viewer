@@ -638,7 +638,7 @@ class AcvTimeline extends HTMLElement {
 
     render(html`
       <style>${this.#styles()}</style>
-      <div id="heatmap"></div>
+      <canvas id="heatmap-canvas"></canvas>
       <div id="ruler" @wheel=${e => this.#onRulerWheel(e)}></div>
       <div id="canvas-wrap">
         <canvas></canvas>
@@ -969,53 +969,78 @@ class AcvTimeline extends HTMLElement {
   // ---------------------------------------------------------------------------
 
   /**
-   * Bucketize spans by cost into 4px-wide columns.
-   * Fills each column with Anthropic purple (rgba(123,47,190, opacity)).
-   * Marks the peak bucket with an amber border.
+   * Bucketize spans by cost into 4px-wide columns and render as a
+   * canvas-based filled area chart with a purple gradient fill and
+   * amber peak marker.
    */
   #renderHeatmap(spans, ts, scrollL) {
-    const el = this._root.querySelector('#heatmap');
-    if (!el) return;
+    const canvas = this._root.querySelector('#heatmap-canvas');
+    if (!canvas) return;
 
-    if (!spans || spans.length === 0) {
-      el.innerHTML = '';
-      return;
-    }
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = canvas.clientWidth || 800;
+    const cssH = canvas.clientHeight || HEATMAP_H;
+    canvas.width  = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
 
-    const colW = 4; // px per bucket
-    const containerW = el.clientWidth || 800;
-    const numCols = Math.ceil(containerW / colW);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    if (!spans || spans.length === 0) return;
+
+    const colW    = 4; // px per bucket
+    const numCols = Math.ceil(cssW / colW);
     const buckets = new Float64Array(numCols);
 
     for (const span of spans) {
       const cost = span.cost_usd || 0;
       if (cost <= 0) continue;
-      // Map the midpoint of the span to a pixel column
-      const midMs  = ((span.start_ms || 0) + (span.end_ms || 0)) / 2;
-      const px     = (midMs - scrollL) / ts;
-      const col    = Math.floor(px / colW);
+      const midMs = ((span.start_ms || 0) + (span.end_ms || 0)) / 2;
+      const px    = (midMs - scrollL) / ts;
+      const col   = Math.floor(px / colW);
       if (col >= 0 && col < numCols) {
         buckets[col] += cost;
       }
     }
 
     // Find peak bucket for normalisation
-    let peak = 0;
+    let peak    = 0;
     let peakIdx = -1;
     for (let i = 0; i < numCols; i++) {
       if (buckets[i] > peak) { peak = buckets[i]; peakIdx = i; }
     }
+    if (peak === 0) return;
 
-    // Build HTML
-    let html = '';
+    // Build area path (filled area chart)
+    ctx.beginPath();
+    ctx.moveTo(0, cssH);
     for (let i = 0; i < numCols; i++) {
-      if (buckets[i] <= 0) continue;
-      const opacity = peak > 0 ? Math.max(0.08, buckets[i] / peak) : 0;
-      const isAmber = i === peakIdx;
-      const border  = isAmber ? 'border:1px solid #f59e0b;' : '';
-      html += `<div style="position:absolute;left:${i * colW}px;top:0;width:${colW}px;height:100%;background:rgba(123,47,190,${opacity.toFixed(3)});${border}box-sizing:border-box;"></div>`;
+      const norm = buckets[i] > 0 ? Math.max(0.08, buckets[i] / peak) : 0;
+      const y    = cssH - norm * cssH;
+      ctx.lineTo(i * colW, y);
+      ctx.lineTo((i + 1) * colW, y);
     }
-    el.innerHTML = html;
+    ctx.lineTo(cssW, cssH);
+    ctx.closePath();
+
+    // Purple gradient fill: Anthropic purple rgba(123, 47, 190, ...)
+    const grad = ctx.createLinearGradient(0, 0, 0, cssH);
+    grad.addColorStop(0, 'rgba(123, 47, 190, 0.8)');
+    grad.addColorStop(1, 'rgba(123, 47, 190, 0.1)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Amber peak marker dot
+    if (peakIdx >= 0) {
+      const peakX = peakIdx * colW + colW / 2;
+      const norm  = Math.max(0.08, buckets[peakIdx] / peak);
+      const peakY = cssH - norm * cssH;
+      ctx.beginPath();
+      ctx.arc(peakX, peakY, 3, 0, Math.PI * 2);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fill();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1134,10 +1159,10 @@ class AcvTimeline extends HTMLElement {
         font-family: "SF Mono", Consolas, Monaco, monospace;
         font-size: 12px;
       }
-      #heatmap {
+      #heatmap-canvas {
+        display: block;
+        width: 100%;
         height: 20px;
-        position: relative;
-        overflow: hidden;
         flex-shrink: 0;
         background: var(--bg, #0d1117);
       }
