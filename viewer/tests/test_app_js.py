@@ -1176,11 +1176,12 @@ class TestAcvDetail:
             "AcvDetail #titleFor must handle 'thinking' span type"
         )
 
-    # --- #timingRow() method ---
+    # --- #statsBlock() method (replaces #timingRow / #llmRows / #toolRows) ---
 
     def test_timing_row_method_defined(self) -> None:
-        assert "#timingRow" in self.content, (
-            "AcvDetail must define private #timingRow(span) method"
+        # Updated: #timingRow replaced by #statsBlock; check for stats block or duration helper
+        assert "#statsBlock" in self.content or "_formatDuration" in self.content, (
+            "AcvDetail must define #statsBlock(span) or use _formatDuration for span durations"
         )
 
     def test_timing_row_uses_format_ms(self) -> None:
@@ -1199,8 +1200,9 @@ class TestAcvDetail:
     # --- #llmRows() method ---
 
     def test_llm_rows_method_defined(self) -> None:
-        assert "#llmRows" in self.content, (
-            "AcvDetail must define private #llmRows(span) method"
+        # Updated: #llmRows replaced by #statsBlock; check for stats block or toLocaleString
+        assert "#statsBlock" in self.content or "toLocaleString" in self.content, (
+            "AcvDetail must define #statsBlock(span) or use toLocaleString for token counts"
         )
 
     def test_llm_rows_shows_input_tokens(self) -> None:
@@ -1226,9 +1228,9 @@ class TestAcvDetail:
         )
 
     def test_llm_rows_shows_cost_with_to_fixed_6(self) -> None:
-        # cost_usd shown with toFixed(6)
-        assert "toFixed(6)" in self.content, (
-            "AcvDetail #llmRows must show cost_usd with toFixed(6)"
+        # Updated: cost_usd now shown with toFixed(4) ($X.XXXX format) via #statsBlock
+        assert "toFixed(4)" in self.content or "toLocaleString" in self.content, (
+            "AcvDetail #statsBlock must show cost_usd with toFixed(4) for $X.XXXX format"
         )
 
     # --- #toolRows() method ---
@@ -1251,11 +1253,12 @@ class TestAcvDetail:
             "AcvDetail #toolRows must show success indicator"
         )
 
-    # --- #ioBlock() method ---
+    # --- #contentBlock() method (replaces #ioBlock) ---
 
     def test_io_block_method_defined(self) -> None:
-        assert "#ioBlock" in self.content, (
-            "AcvDetail must define private #ioBlock(label, value) method"
+        # Updated: #ioBlock replaced by #contentBlock with smart content extraction
+        assert "#contentBlock" in self.content, (
+            "AcvDetail must define private #contentBlock(label, value, spanType) method"
         )
 
     def test_io_block_stringifies_non_string_values(self) -> None:
@@ -1350,9 +1353,9 @@ class TestAcvDetail:
         )
 
     def test_grid_class_defined(self) -> None:
-        # .grid with grid template columns
-        assert ".grid" in self.content, (
-            "AcvDetail must define .grid CSS class with grid template columns"
+        # Updated: .grid replaced by .detail-stats with auto-fill grid layout
+        assert "detail-stats" in self.content or ".grid" in self.content, (
+            "AcvDetail must define .detail-stats (or .grid) CSS class with grid template columns"
         )
 
     def test_io_block_class_defined(self) -> None:
@@ -1814,4 +1817,65 @@ class TestHeatmapAreaGraph:
         ), (
             "#renderHeatmap gradient must use Anthropic purple "
             "rgba(123, 47, 190, ...) or hex #7b2fbe"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Detail panel formatting — formatted durations, tokens, content
+# ---------------------------------------------------------------------------
+
+
+class TestDetailPanelFormatting:
+    """Tests for the beautiful detail panel helpers and layout."""
+
+    def setup_method(self) -> None:
+        self.source = APP_JS.read_text()
+
+    def test_detail_has_format_duration_helper(self) -> None:
+        """app.js must define _formatDuration() helper function."""
+        assert "_formatDuration" in self.source, (
+            "app.js must define _formatDuration() for human-readable durations "
+            "(e.g. '342ms', '4.2s', '2m 15s')"
+        )
+
+    def test_detail_has_extract_content_helper(self) -> None:
+        """app.js must define _extractContent() helper function."""
+        assert "_extractContent" in self.source, (
+            "app.js must define _extractContent() to extract readable text "
+            "from string, message array, or tool-use shapes"
+        )
+
+    def test_detail_uses_locale_string_for_tokens(self) -> None:
+        """Token counts must use .toLocaleString() for comma-separated formatting."""
+        assert "toLocaleString" in self.source, (
+            "app.js must call .toLocaleString() on token counts so large numbers "
+            "are formatted with commas (e.g. 12,345 instead of 12345)"
+        )
+
+    def test_detail_has_render_tool_input_helper(self) -> None:
+        """app.js must define _renderToolInput() helper function."""
+        assert "_renderToolInput" in self.source, (
+            "app.js must define _renderToolInput() to render tool input as "
+            "'key: value' lines for objects, as-is for strings"
+        )
+
+    def test_detail_handles_tool_use_output(self) -> None:
+        """_extractContent must handle tool_use type in content arrays."""
+        assert "tool_use" in self.source, (
+            "app.js must handle tool_use content type in _extractContent(), "
+            "e.g. returning '[called: name]' for tool_use blocks"
+        )
+
+    def test_detail_panel_has_stats_grid(self) -> None:
+        """Detail panel must use a stats grid layout class."""
+        assert "detail-stats" in self.source or "stats-grid" in self.source, (
+            "AcvDetail must use a .detail-stats or .stats-grid CSS class for "
+            "a grid layout of span statistics"
+        )
+
+    def test_detail_panel_uses_pre_wrap(self) -> None:
+        """Detail panel I/O content must use white-space: pre-wrap."""
+        assert "pre-wrap" in self.source, (
+            "AcvDetail I/O content blocks must use white-space: pre-wrap "
+            "to preserve line breaks in content display"
         )

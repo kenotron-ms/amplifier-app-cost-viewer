@@ -176,6 +176,69 @@ function _fmtTokens(n) {
 }
 
 /**
+ * Format a duration in milliseconds as a human-readable string.
+ * < 1000ms → '342ms'
+ * < 60s    → '4.2s'
+ * else     → '2m 15s'
+ * Returns '—' for null/negative.
+ */
+function _formatDuration(ms) {
+  if (ms == null || ms < 0) return '\u2014';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60000);
+  const s = Math.round((ms % 60000) / 1000);
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
+}
+
+/**
+ * Extract readable text from various content shapes:
+ * - string → return as-is
+ * - array of messages [{role, content}] → extract last user message content
+ * - {role, content: [{type:'text', text:'...'}]} → extract text
+ * - {role, content: [{type:'tool_use', name:'...'}]} → '[called: name]'
+ * - null/undefined → '—'
+ */
+function _extractContent(value) {
+  if (value == null) return '\u2014';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    // Array of messages [{role, content}] — find last user message
+    const userMsgs = value.filter(m => m && m.role === 'user');
+    const last = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1] : value[value.length - 1];
+    if (!last) return '\u2014';
+    return _extractContent(last.content != null ? last.content : last);
+  }
+  if (typeof value === 'object') {
+    if (Array.isArray(value.content)) {
+      const parts = value.content.map(block => {
+        if (block.type === 'text') return block.text;
+        if (block.type === 'tool_use') return `[called: ${block.name}]`;
+        return '';
+      }).filter(Boolean);
+      return parts.join('\n') || '\u2014';
+    }
+    if (value.content != null) return _extractContent(value.content);
+    if (value.text != null) return value.text;
+  }
+  return String(value);
+}
+
+/**
+ * Render tool input as 'key: value' lines for objects, as-is for strings, '—' for null.
+ */
+function _renderToolInput(input) {
+  if (input == null) return '\u2014';
+  if (typeof input === 'string') return input;
+  if (typeof input === 'object') {
+    const lines = Object.entries(input)
+      .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
+    return lines.join('\n') || '\u2014';
+  }
+  return String(input);
+}
+
+/**
  * Format a date string (ISO 8601) as a human-readable relative label.
  * Today     → "Today"
  * Yesterday → "Yesterday"
@@ -1243,13 +1306,13 @@ class AcvDetail extends HTMLElement {
             <span class="title">${this.#titleFor(span)}</span>
             <button class="close-btn" @click=${() => this.#onClose()}>✕</button>
           </div>
-          <div class="grid">
-            ${this.#timingRow(span)}
-            ${span.type === 'llm' || span.model ? this.#llmRows(span) : ''}
-            ${span.type === 'tool' ? this.#toolRows(span) : ''}
+          <div class="detail-stats">
+            ${this.#statsBlock(span)}
           </div>
-          ${this.#ioBlock('INPUT', span.input)}
-          ${this.#ioBlock('OUTPUT', span.output)}
+          ${span.type !== 'thinking' ? html`
+            ${this.#contentBlock('INPUT', span.input, span.type)}
+            ${this.#contentBlock('OUTPUT', span.output, span.type)}
+          ` : ''}
         </div>
       ` : html`<div class="hidden"></div>`}
     `, this._root);
@@ -1285,60 +1348,98 @@ class AcvDetail extends HTMLElement {
   }
 
   // ---------------------------------------------------------------------------
-  // Private: grid rows
+  // Private: stats block
   // ---------------------------------------------------------------------------
 
-  /** Renders a timing row: start → end (duration) using _formatMs. */
-  #timingRow(span) {
-    const startMs  = span.start_ms || 0;
-    const endMs    = span.end_ms   || 0;
-    const duration = Math.max(0, endMs - startMs);
-    return html`
-      <span class="label">time</span>
-      <span class="value">${_formatMs(startMs)} → ${_formatMs(endMs)} (${_formatMs(duration)})</span>
-    `;
-  }
+  /**
+   * Renders a stats grid for the span.
+   * - thinking spans: Duration only
+   * - tool spans: Duration + Status
+   * - LLM spans: Duration, Cost, Input tok, Output tok, optional Cache read/write
+   */
+  #statsBlock(span) {
+    const durationMs = Math.max(0, (span.end_ms || 0) - (span.start_ms || 0));
+    const dur = _formatDuration(durationMs);
 
-  /** Renders LLM-specific rows: tokens, cache tokens (conditional), cost. */
-  #llmRows(span) {
+    if (span.type === 'thinking') {
+      return html`
+        <div class="stat">
+          <div class="stat-label">DURATION</div>
+          <div class="stat-value">${dur}</div>
+        </div>
+      `;
+    }
+
+    if (span.type === 'tool') {
+      const { icon, color } = this.#successDisplay(span);
+      return html`
+        <div class="stat">
+          <div class="stat-label">DURATION</div>
+          <div class="stat-value">${dur}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">STATUS</div>
+          <div class="stat-value" style="color:${color}">${icon}</div>
+        </div>
+      `;
+    }
+
+    // LLM span (default)
     const inputTok  = span.input_tokens  || 0;
     const outputTok = span.output_tokens || 0;
-    const total     = inputTok + outputTok;
     return html`
-      <span class="label">in tokens</span>  <span class="value">${inputTok}</span>
-      <span class="label">out tokens</span> <span class="value">${outputTok}</span>
-      ${span.cache_read_tokens  ? html`<span class="label">cache read</span>  <span class="value">${span.cache_read_tokens}</span>`  : ''}
-      ${span.cache_write_tokens ? html`<span class="label">cache write</span> <span class="value">${span.cache_write_tokens}</span>` : ''}
-      <span class="label">total tok</span>  <span class="value">${total}</span>
-      ${span.cost_usd != null ? html`<span class="label">cost</span> <span class="value">$${span.cost_usd.toFixed(6)}</span>` : ''}
-    `;
-  }
-
-  /** Renders tool-specific rows: duration and success indicator. */
-  #toolRows(span) {
-    const duration        = _formatMs(Math.max(0, (span.end_ms || 0) - (span.start_ms || 0)));
-    const { icon, color } = this.#successDisplay(span);
-    return html`
-      <span class="label">duration</span> <span class="value">${duration}</span>
-      <span class="label">success</span>  <span class="value" style="color:${color}">${icon}</span>
+      <div class="stat">
+        <div class="stat-label">DURATION</div>
+        <div class="stat-value">${dur}</div>
+      </div>
+      ${span.cost_usd != null ? html`
+        <div class="stat">
+          <div class="stat-label">COST</div>
+          <div class="stat-value">$${span.cost_usd.toFixed(4)}</div>
+        </div>
+      ` : ''}
+      <div class="stat">
+        <div class="stat-label">INPUT TOK</div>
+        <div class="stat-value">${inputTok.toLocaleString()}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">OUTPUT TOK</div>
+        <div class="stat-value">${outputTok.toLocaleString()}</div>
+      </div>
+      ${span.cache_read_tokens ? html`
+        <div class="stat">
+          <div class="stat-label">CACHE READ</div>
+          <div class="stat-value">${span.cache_read_tokens.toLocaleString()}</div>
+        </div>
+      ` : ''}
+      ${span.cache_write_tokens ? html`
+        <div class="stat">
+          <div class="stat-label">CACHE WRITE</div>
+          <div class="stat-value">${span.cache_write_tokens.toLocaleString()}</div>
+        </div>
+      ` : ''}
     `;
   }
 
   // ---------------------------------------------------------------------------
-  // Private: I/O blocks
+  // Private: content blocks
   // ---------------------------------------------------------------------------
 
   /**
    * Renders an INPUT or OUTPUT block.
-   * - Stringifies non-string values with JSON.stringify
-   * - Truncates at IO_TRUNCATE chars with '…' suffix
-   * - Provides a 'show more' link that reveals the full text
+   * - Uses _renderToolInput for tool inputs, _extractContent for everything else
+   * - Truncates at IO_TRUNCATE (500 chars) with 'show more' link
+   * - Uses pre-wrap for content display
    */
-  #ioBlock(label, value) {
+  #contentBlock(label, value, spanType) {
     if (value == null) return '';
-    const str       = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    const str = (spanType === 'tool' && label === 'INPUT')
+      ? _renderToolInput(value)
+      : _extractContent(value);
+    if (!str || str === '\u2014') return '';
+
     const truncated = str.length > IO_TRUNCATE;
-    const display   = truncated ? str.slice(0, IO_TRUNCATE) + '…' : str;
+    const display   = truncated ? str.slice(0, IO_TRUNCATE) + '\u2026' : str;
 
     const handleShowMore = (e) => {
       e.preventDefault();
@@ -1407,13 +1508,30 @@ class AcvDetail extends HTMLElement {
         border-radius: 3px;
       }
       .close-btn:hover { color: var(--text, #e6edf3); }
-      .grid {
+      .detail-stats {
         display: grid;
-        grid-template-columns: max-content 1fr;
-        gap: 4px 12px;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 8px;
         margin-bottom: 10px;
       }
-      .label { color: var(--text-muted, #8b949e); }
+      .stat {
+        background: var(--surface-alt, #21262d);
+        border: 1px solid var(--border, #30363d);
+        border-radius: 6px;
+        padding: 6px 10px;
+      }
+      .stat-label {
+        text-transform: uppercase;
+        font-size: 9px;
+        color: var(--text-muted, #8b949e);
+        letter-spacing: 0.06em;
+        margin-bottom: 2px;
+      }
+      .stat-value {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text, #e6edf3);
+      }
       .io-block { margin-top: 8px; }
       .io-label {
         text-transform: uppercase;
@@ -1427,6 +1545,7 @@ class AcvDetail extends HTMLElement {
         background: var(--surface-alt, #21262d);
         padding: 6px 8px;
         border-radius: 4px;
+        border: 1px solid var(--border, #30363d);
         overflow: auto;
         max-height: 80px;
         white-space: pre-wrap;
