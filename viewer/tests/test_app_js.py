@@ -1628,3 +1628,24 @@ def test_drag_pan_mousemove_handler(app_js_code: str) -> None:
 def test_drag_pan_stops_on_mouseleave(app_js_code: str) -> None:
     """Drag must stop on mouseleave to avoid stuck drag state."""
     assert "mouseleave" in app_js_code
+
+
+# ---------------------------------------------------------------------------
+# Tests: Cmd/Ctrl+scroll zoom on the gantt canvas
+# ---------------------------------------------------------------------------
+
+
+def test_canvas_ctrl_scroll_zoom(app_js_code: str) -> None:
+    """Canvas must have a wheel listener that fires on ctrlKey/metaKey for zoom."""
+    # Must have passive: false to prevent browser native zoom interference
+    assert "passive: false" in app_js_code or "passive:false" in app_js_code, (
+        "Canvas wheel listener must use { passive: false } to allow preventDefault() "
+        "and suppress browser native zoom/scroll"
+    )
+    # Must check ctrlKey or metaKey
+    assert "ctrlKey" in app_js_code, (
+        "Canvas wheel listener must check e.ctrlKey for Ctrl+scroll (Windows/Linux)"
+    )
+    assert "metaKey" in app_js_code, (
+        "Canvas wheel listener must check e.metaKey for Cmd+scroll (macOS)"
+    )

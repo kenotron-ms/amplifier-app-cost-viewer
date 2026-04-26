@@ -642,6 +642,47 @@ class AcvTimeline extends HTMLElement {
         this.#isDragging = false;
         canvas.style.cursor = 'grab';
       });
+
+      // Cmd+scroll (macOS) / Ctrl+scroll (Windows/Linux) zoom on the canvas.
+      // { passive: false } is critical — it allows preventDefault() to suppress
+      // the browser's native zoom/scroll (without it the browser fights our zoom).
+      canvas.addEventListener('wheel', e => {
+        if (!e.ctrlKey && !e.metaKey) return; // only when Ctrl/Cmd held
+        e.preventDefault();
+        e.stopPropagation();
+
+        const factor = e.deltaY > 0 ? 1.3 : (1 / 1.3);
+
+        // Compute cursor position in canvas coordinates for cursor-anchored zoom
+        const rect = canvas.getBoundingClientRect();
+        const cursorX = e.clientX - rect.left; // CSS pixels from left edge
+        const cursorMs = (cursorX + state.scrollLeft) * state.timeScale; // ms at cursor
+
+        const oldScale = state.timeScale;
+        const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldScale * factor));
+        if (newScale === oldScale) return;
+
+        state.timeScale = newScale;
+
+        // Keep cursor ms fixed: cursorMs / newScale - cursorX = new scrollLeft
+        state.scrollLeft = Math.max(0, cursorMs / newScale - cursorX);
+
+        // Update zoom label
+        const label = this._root.querySelector('#zoom-label')
+          || document.getElementById('zoom-label');
+        if (label) {
+          label.textContent = newScale < 1
+            ? `${(1 / newScale).toFixed(1)}px/ms`
+            : `${newScale.toFixed(0)}ms/px`;
+        }
+
+        // RAF-debounced redraw (same pattern as ruler zoom)
+        if (this._zoomRaf) cancelAnimationFrame(this._zoomRaf);
+        this._zoomRaf = requestAnimationFrame(() => {
+          this.#draw();
+          this._zoomRaf = null;
+        });
+      }, { passive: false });
     }
     return true;
   }
