@@ -113,6 +113,55 @@ function _formatMs(ms) {
 }
 
 /**
+ * Nice human-readable tick intervals for the ruler (ms).
+ * Covers 100ms → 1h; used by both #renderRuler and the grid-line drawing.
+ */
+const NICE_INTERVALS = [
+  100,      // 0.1s
+  250,      // 0.25s
+  500,      // 0.5s
+  1000,     // 1s
+  2000,     // 2s
+  5000,     // 5s
+  10000,    // 10s
+  30000,    // 30s
+  60000,    // 1m
+  120000,   // 2m
+  300000,   // 5m
+  600000,   // 10m
+  1800000,  // 30m
+  3600000,  // 1h
+];
+
+/**
+ * Format a ruler tick label based on the active tick interval.
+ * Uses interval-aware units so labels are always readable at any zoom level.
+ */
+function _formatRulerLabel(ms, intervalMs) {
+  if (ms === 0) return '0';
+  if (intervalMs < 1000) {
+    // Sub-second: show ms
+    return ms + 'ms';
+  }
+  if (intervalMs < 60000) {
+    // Seconds
+    return Math.round(ms / 1000) + 's';
+  }
+  if (intervalMs < 3600000) {
+    // Minutes[:seconds]
+    const totalSec = Math.round(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return s === 0 ? `${m}m` : `${m}m${s}s`;
+  }
+  // Hours[:minutes]
+  const totalMin = Math.round(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m === 0 ? `${h}h` : `${h}h${m}m`;
+}
+
+/**
  * Format a token count as a compact string.
  * >= 1000 → "12.3k"
  * else    → "512"
@@ -643,22 +692,21 @@ class AcvTimeline extends HTMLElement {
     }
 
     // 6. Draw vertical grid lines matching ruler tick intervals (strokeStyle #21262d)
+    //    Uses the same NICE_INTERVALS adaptive algorithm as #renderRuler.
     {
-      const visibleMs  = cw * ts;
-      const INTERVALS  = [500, 5000, 30000, 60000, 300000, 900000];
-      let interval     = INTERVALS[INTERVALS.length - 1];
-      for (const iv of INTERVALS) {
-        if (visibleMs / iv <= 14) { interval = iv; break; }
-      }
-      const startMs   = scrollL * ts;
-      const endMs     = startMs + visibleMs;
-      const firstTick = Math.ceil(startMs / interval) * interval;
+      const visibleMs      = cw * ts;
+      const rawInterval    = visibleMs / 8;
+      const tickIntervalMs = NICE_INTERVALS.find(v => v >= rawInterval)
+        || NICE_INTERVALS[NICE_INTERVALS.length - 1];
+      const scrollLeftMs   = scrollL * ts;
+      const lastTickMs     = scrollLeftMs + visibleMs;
+      const firstTick      = Math.ceil(scrollLeftMs / tickIntervalMs) * tickIntervalMs;
 
       ctx.beginPath();
       ctx.strokeStyle = '#21262d';
       ctx.lineWidth   = 1;
-      for (let ms = firstTick; ms <= endMs; ms += interval) {
-        const px = (ms / ts) - scrollL;
+      for (let ms = firstTick; ms <= lastTickMs + tickIntervalMs; ms += tickIntervalMs) {
+        const px = (ms - scrollLeftMs) / ts;
         if (px < 0 || px > cw) continue;
         ctx.moveTo(px, 0);
         ctx.lineTo(px, ch);
@@ -827,8 +875,9 @@ class AcvTimeline extends HTMLElement {
   // ---------------------------------------------------------------------------
 
   /**
-   * Compute nice tick intervals and render tick divs (tick-line + tick-label).
-   * Tick intervals: 500 / 5000 / 30000 / 60000 / 300000 / 900000 ms
+   * Adaptive tick rendering — Chrome DevTools style.
+   * Selects a tick interval from NICE_INTERVALS so ~8 ticks fit the visible
+   * window, then draws only ticks in the visible range (scrollL…scrollL+W).
    */
   #renderRuler(spans, ts, scrollL) {
     const el = this._root.querySelector('#ruler');
@@ -836,28 +885,28 @@ class AcvTimeline extends HTMLElement {
 
     const containerW = el.clientWidth || 800;
 
-    // Choose a tick interval so we get ~8–12 ticks across the view
+    // Visible time window in ms
     const visibleMs = containerW * ts;
-    const INTERVALS = [500, 5000, 30000, 60000, 300000, 900000];
-    let interval = INTERVALS[INTERVALS.length - 1];
-    for (const iv of INTERVALS) {
-      if (visibleMs / iv <= 14) { interval = iv; break; }
-    }
 
-    // Compute start/end in ms
-    const startMs = scrollL * ts;
-    const endMs   = startMs + visibleMs;
+    // Target ~8 ticks across the view; snap to nearest nice interval
+    const rawInterval = visibleMs / 8;
+    const tickIntervalMs = NICE_INTERVALS.find(v => v >= rawInterval)
+      || NICE_INTERVALS[NICE_INTERVALS.length - 1];
 
-    // First tick at or after startMs
-    const firstTick = Math.ceil(startMs / interval) * interval;
+    // Convert scroll offset to ms
+    const scrollLeftMs = scrollL * ts;
+    const lastTickMs   = scrollLeftMs + visibleMs;
+
+    // First tick at or after scrollLeftMs
+    const firstTick = Math.ceil(scrollLeftMs / tickIntervalMs) * tickIntervalMs;
 
     let html = '';
-    for (let ms = firstTick; ms <= endMs; ms += interval) {
-      const px = (ms / ts) - scrollL;
+    for (let ms = firstTick; ms <= lastTickMs + tickIntervalMs; ms += tickIntervalMs) {
+      const px = (ms - scrollLeftMs) / ts;
       if (px < 0 || px > containerW) continue;
       html += `<div class="tick" style="left:${px.toFixed(1)}px;">` +
         `<div class="tick-line"></div>` +
-        `<div class="tick-label">${_formatMs(ms)}</div>` +
+        `<div class="tick-label">${_formatRulerLabel(ms, tickIntervalMs)}</div>` +
         `</div>`;
     }
     el.innerHTML = html;

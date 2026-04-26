@@ -1533,9 +1533,7 @@ def app_js_code() -> str:
 
 def test_state_has_loading_field(app_js_code: str) -> None:
     """state object must have loading: false"""
-    assert "loading: false" in app_js_code, (
-        "state must declare 'loading: false' field"
-    )
+    assert "loading: false" in app_js_code, "state must declare 'loading: false' field"
 
 
 def test_loading_set_in_load_session(app_js_code: str) -> None:
@@ -1574,6 +1572,33 @@ def test_canvas_shows_loading_text(app_js_code: str) -> None:
         "this._loading" in app_js_code
         or "this.#loading" in app_js_code
         or "_loading" in app_js_code
-    ), (
-        "AcvTimeline must track loading state via this._loading or this.#loading"
+    ), "AcvTimeline must track loading state via this._loading or this.#loading"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Adaptive ruler ticks — Chrome DevTools style
+# ---------------------------------------------------------------------------
+
+
+def test_ruler_uses_adaptive_tick_interval(app_js_code: str) -> None:
+    """Ruler must use NICE_INTERVALS array for adaptive tick selection."""
+    assert "NICE_INTERVALS" in app_js_code, (
+        "Ruler must use NICE_INTERVALS array (Chrome DevTools adaptive ticks) "
+        "instead of a fixed sparse INTERVALS list"
+    )
+
+
+def test_ruler_label_formats_minutes(app_js_code: str) -> None:
+    """_formatRulerLabel must exist for ruler-specific label formatting."""
+    assert "_formatRulerLabel" in app_js_code, (
+        "_formatRulerLabel function must exist to format ruler tick labels "
+        "with ms/s/m/h units based on the active tick interval"
+    )
+
+
+def test_ruler_starts_from_visible_window(app_js_code: str) -> None:
+    """Ruler tick computation must account for scrollLeft offset."""
+    assert "scrollLeftMs" in app_js_code, (
+        "Ruler must compute scrollLeftMs = scrollLeft * timeScale so ticks "
+        "start from the visible window, not from t=0"
     )
