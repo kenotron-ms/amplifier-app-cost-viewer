@@ -258,7 +258,6 @@ function _rowIndexMap(sessionData, expanded) {
 function _animateZoom(targetScale, anchorMs, anchorPx) {
   const DURATION = 100; // ms
   const startScale = state.timeScale;
-  const startScrollLeft = state.scrollLeft;
   const startTime = performance.now();
 
   // Cancel any in-flight zoom animation before starting a new one
