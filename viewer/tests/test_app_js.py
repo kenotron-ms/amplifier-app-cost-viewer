@@ -2423,3 +2423,73 @@ def test_overview_peak_marker_amber(app_js_code: str) -> None:
     assert "f59e0b" in app_js_code, (
         "AcvOverview #draw() must draw an amber peak marker using color '#f59e0b'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests: UI improvements — model filter, copy btn, agent labels, pie chart
+# ---------------------------------------------------------------------------
+
+
+def test_model_filter_state(app_js_code: str) -> None:
+    """state must have modelFilter Set."""
+    assert 'modelFilter' in app_js_code, (
+        "state must declare 'modelFilter' property (a Set for model filtering)"
+    )
+
+
+def test_filter_bar_rendered(app_js_code: str) -> None:
+    """filter-bar must be rendered."""
+    assert 'filter-bar' in app_js_code, (
+        "AcvBody must render a .filter-bar element above the table"
+    )
+    assert 'model-btn' in app_js_code, (
+        "AcvBody filter bar must render .model-btn toggle buttons"
+    )
+
+
+def test_draw_skips_filtered_models(app_js_code: str) -> None:
+    """#draw must skip spans whose model is in modelFilter."""
+    assert 'modelFilter.has' in app_js_code, (
+        "AcvBody #draw() must check state.modelFilter.has(span.model) to skip filtered spans"
+    )
+
+
+def test_format_agent_name_helper(app_js_code: str) -> None:
+    """_formatAgentName must extract clean name from long session format."""
+    assert '_formatAgentName' in app_js_code, (
+        "app.js must define a '_formatAgentName' helper to clean up long agent name strings"
+    )
+
+
+def test_copy_button_in_labels(app_js_code: str) -> None:
+    """Tree labels must have copy-btn for session ID clipboard copy."""
+    assert 'copy-btn' in app_js_code, (
+        "AcvBody tree labels must render a .copy-btn button"
+    )
+    assert 'clipboard' in app_js_code, (
+        "AcvBody copy button must use navigator.clipboard to copy session ID"
+    )
+
+
+def test_short_model_name_helper(app_js_code: str) -> None:
+    """_shortModelName must exist for display in filter buttons."""
+    assert '_shortModelName' in app_js_code, (
+        "app.js must define a '_shortModelName' helper for compact model name display"
+    )
+
+
+def test_pie_chart_canvas_in_summary(app_js_code: str) -> None:
+    """Summary tab must render a pie chart canvas."""
+    assert 'pie-canvas' in app_js_code, (
+        "AcvDetail Summary tab must render a <canvas class='pie-canvas'>"
+    )
+    assert 'pie-legend' in app_js_code, (
+        "AcvDetail Summary tab must render a .pie-legend element alongside the pie chart"
+    )
+
+
+def test_pie_chart_renderer_function(app_js_code: str) -> None:
+    """Pie chart renderer method must exist."""
+    assert '#renderPieChart' in app_js_code or 'renderPieChart' in app_js_code, (
+        "AcvDetail must define a '#renderPieChart' or 'renderPieChart' method"
+    )

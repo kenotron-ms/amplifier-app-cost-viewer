@@ -39,6 +39,7 @@ const state = {
   sessionData:     null,  // full session tree from GET /api/sessions/{id}
   spans:           [],    // flattened spans from GET /api/sessions/{id}/spans
   expandedSessions: new Set(), // session IDs expanded in the tree
+  modelFilter:     new Set(), // models to HIDE (empty = show all)
   selectedSpan:    null,  // span shown in the detail panel
   timeScale:       1,     // ms per pixel
   scrollLeft:      0,     // timeline horizontal scroll position (px)
@@ -447,6 +448,50 @@ function _esc(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/**
+ * Return a CSS color for a span based on its provider/model.
+ * Used by filter bar buttons and pie chart to match span colors.
+ */
+function _spanColor(span) {
+  const provider = (span.provider || '').toLowerCase();
+  const model    = (span.model    || '').toLowerCase();
+  if (provider === 'anthropic' || model.includes('claude')) return '#7b2fbe';
+  if (provider === 'openai'    || model.includes('gpt') || model.startsWith('o')) return '#10a37f';
+  if (provider === 'google'    || model.includes('gemini')) return '#4285f4';
+  return '#64748b';
+}
+
+/**
+ * Shorten a model name for compact display in filter buttons.
+ * "claude-sonnet-4-6" → "sonnet-4-6"
+ * "gpt-5.4"          → "gpt-5.4"  (kept)
+ * "gemini-pro"       → "gemini-pro" (kept)
+ */
+function _shortModelName(model) {
+  return model
+    .replace(/^claude-/, '')
+    .slice(0, 16);
+}
+
+/**
+ * Format an agent_name field for display in tree labels.
+ * "0000000000000000-abc123_superpowers-implementer" → "superpowers:implementer"
+ * "superpowers:implementer" → "superpowers:implementer"  (already clean)
+ */
+function _formatAgentName(agentName) {
+  if (!agentName) return null;
+  const underscoreIdx = agentName.lastIndexOf('_');
+  if (underscoreIdx > 10) {
+    // Has the long prefix format — extract the suffix
+    const rest = agentName.slice(underscoreIdx + 1);
+    // "superpowers-implementer" → "superpowers:implementer"
+    const colonIdx = rest.indexOf('-');
+    if (colonIdx > 0) return rest.slice(0, colonIdx) + ':' + rest.slice(colonIdx + 1);
+    return rest;
+  }
+  return agentName;
 }
 
 // =============================================================================
@@ -1127,7 +1172,55 @@ class AcvBody extends HTMLElement {
           display: block;
         }
         #main-canvas.dragging { cursor: grabbing; }
+        /* ---- Model filter bar ---- */
+        .filter-bar {
+          display: flex; align-items: center; gap: 4px;
+          padding: 4px 8px; background: #161b22;
+          border-bottom: 1px solid #30363d;
+          overflow-x: auto; flex-shrink: 0;
+        }
+        .filter-label { font-size: 10px; color: #8b949e; flex-shrink: 0; }
+        .model-btn {
+          font-size: 10px; font-family: monospace;
+          padding: 2px 8px; border-radius: 10px; cursor: pointer;
+          border: 1px solid var(--model-color);
+          white-space: nowrap; transition: opacity 0.1s;
+        }
+        .model-btn.active  { background: var(--model-color); color: #fff; opacity: 1; }
+        .model-btn.inactive { background: transparent; color: var(--model-color); opacity: 0.5; }
+        .filter-clear { font-size: 10px; padding: 2px 6px; border-radius: 10px; cursor: pointer; border: 1px solid #30363d; background: none; color: #8b949e; }
+        /* ---- Copy button in tree labels ---- */
+        .copy-btn {
+          flex-shrink: 0; background: none; border: none;
+          color: #8b949e; font-size: 10px; cursor: pointer;
+          padding: 0 2px; opacity: 0; transition: opacity 0.1s;
+          vertical-align: middle;
+        }
+        .td-label:hover .copy-btn { opacity: 1; }
+        .copy-btn:hover { color: #58a6ff; }
       </style>
+      ${(() => {
+          const models = [...new Set((state.spans || []).map(s => s.model).filter(Boolean))].sort();
+          if (models.length < 2) return '';
+          return html`<div class="filter-bar">
+            <span class="filter-label">Filter:</span>
+            ${models.map(model => {
+              const color = _spanColor({ type: 'llm', model, provider: model.includes('claude') ? 'anthropic' : (model.includes('gpt') || model.startsWith('o')) ? 'openai' : 'google' });
+              const active = !state.modelFilter.has(model);
+              return html`<button
+                class="model-btn ${active ? 'active' : 'inactive'}"
+                style="--model-color: ${color}"
+                @click=${() => {
+                  if (state.modelFilter.has(model)) state.modelFilter.delete(model);
+                  else state.modelFilter.add(model);
+                  renderAll();
+                }}
+                title="${model}"
+              >${_shortModelName(model)}</button>`;
+            })}
+            ${state.modelFilter.size > 0 ? html`<button class="filter-clear" @click=${() => { state.modelFilter.clear(); renderAll(); }}>✕ clear</button>` : ''}
+          </div>`;
+        })()}
       <div class="table-wrap" id="table-wrap">
         <table>
           <colgroup>
@@ -1148,7 +1241,13 @@ class AcvBody extends HTMLElement {
               const isExpanded = state.expandedSessions.has(node.session_id);
               const toggle = hasChildren ? (isExpanded ? '▾' : '▸') : '\u00a0';
               const cost = node.total_cost_usd || 0;
-              const name = node.name || node.agent_name || node.session_id.slice(-8);
+              // Priority: formatted agent_name > name > last 8 chars of session_id
+              const displayName = (() => {
+                const formatted = _formatAgentName(node.agent_name);
+                if (formatted) return formatted;
+                if (node.name) return node.name.slice(0, 28);
+                return node.session_id.slice(-8);
+              })();
               const isLive = !node.end_ts;
               const bg = absIdx % 2 === 0 ? '#0d1117' : '#161b22';
               const indent = 8 + depth * 14;
@@ -1159,7 +1258,13 @@ class AcvBody extends HTMLElement {
                     style="padding-left: ${indent}px; background: ${bg};"
                     title=${node.session_id}
                     @click=${() => this._onLabelClick(node.session_id, hasChildren)}
-                  ><span class="label-cost">$${cost.toFixed(4)}</span><span class="label-toggle">${toggle}</span><span class="label-name">${name}</span>${isLive ? html`<span class="live-dot" title="Session in progress">●</span>` : ''}</td>
+                  ><span class="label-cost">$${cost.toFixed(4)}</span><span class="label-toggle">${toggle}</span><span class="label-name" title="${node.session_id}">${displayName}</span><button class="copy-btn" title="Copy session ID: ${node.session_id}" @click=${(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(node.session_id).then(() => {
+                      e.target.textContent = '✓';
+                      setTimeout(() => { e.target.textContent = '⎘'; }, 1500);
+                    });
+                  }}>⎘</button>${isLive ? html`<span class="live-dot" title="Session in progress">●</span>` : ''}</td>
                   <td class="td-canvas" style="background: ${bg};"></td>
                 </tr>`;
             })}
@@ -1366,6 +1471,8 @@ class AcvBody extends HTMLElement {
     // Color-batched span rectangles
     const batches = new Map();
     for (const span of state.spans) {
+      // Skip spans whose model is in the modelFilter set
+      if (state.modelFilter.size > 0 && state.modelFilter.has(span.model)) continue;
       const rowIdx = rowMap.get(span.session_id);
       if (rowIdx === undefined) continue;
       const y = rowIdx * this.#rowH + (this.#rowH - SPAN_H) / 2;
@@ -1389,6 +1496,7 @@ class AcvBody extends HTMLElement {
     ctx.font         = '10px monospace';
     ctx.textBaseline = 'middle';
     for (const span of state.spans) {
+      if (state.modelFilter.size > 0 && state.modelFilter.has(span.model)) continue;
       const rowIdx = rowMap.get(span.session_id);
       if (rowIdx === undefined) continue;
       const x = timeToPixel(span.start_ms || 0, W);
@@ -1722,7 +1830,22 @@ class AcvDetail extends HTMLElement {
 
   #renderTab(span) {
     if (this.#activeTab === 'summary') {
-      return html`<div class="detail-stats">${this.#statsBlock(span)}</div>`;
+      const summaryContent = html`
+        <div class="detail-stats">${this.#statsBlock(span)}</div>
+        <div class="pie-section">
+          <div class="pie-title">Cost breakdown — this session</div>
+          <div class="pie-row">
+            <canvas class="pie-canvas"></canvas>
+            <div class="pie-legend"></div>
+          </div>
+        </div>
+      `;
+      // Render pie chart after DOM update
+      requestAnimationFrame(() => {
+        const panel = this._root.querySelector('.tab-content');
+        if (panel) this.#renderPieChart(panel);
+      });
+      return summaryContent;
     }
     if (this.#activeTab === 'input') {
       return this.#ioTabContent(span, 'input', span.input);
@@ -1751,6 +1874,67 @@ class AcvDetail extends HTMLElement {
         }
       </div>
     `;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: pie chart renderer (cost breakdown by model for all spans)
+  // ---------------------------------------------------------------------------
+
+  #renderPieChart(container) {
+    const spans = state.spans || [];
+    if (spans.length === 0) return;
+
+    // Aggregate cost by model
+    const byCost = new Map();
+    for (const s of spans) {
+      if (!s.cost_usd || s.cost_usd <= 0) continue;
+      const key = s.model || s.provider || 'unknown';
+      byCost.set(key, (byCost.get(key) || 0) + s.cost_usd);
+    }
+    if (byCost.size === 0) return;
+
+    // Sort by cost descending
+    const entries = [...byCost.entries()].sort((a, b) => b[1] - a[1]);
+    const total = entries.reduce((sum, [, v]) => sum + v, 0);
+
+    // Draw pie chart on canvas
+    const canvas = container.querySelector('.pie-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const SIZE = 80;
+    canvas.width  = SIZE * dpr;
+    canvas.height = SIZE * dpr;
+    canvas.style.width  = SIZE + 'px';
+    canvas.style.height = SIZE + 'px';
+    ctx.scale(dpr, dpr);
+
+    const cx = SIZE / 2, cy = SIZE / 2, r = SIZE / 2 - 4;
+    let startAngle = -Math.PI / 2;
+
+    for (const [model, cost] of entries) {
+      const fraction = cost / total;
+      const endAngle = startAngle + fraction * 2 * Math.PI;
+      const color = _spanColor({ type: 'llm', model, provider: model.includes('claude') ? 'anthropic' : (model.includes('gpt') || model.startsWith('o')) ? 'openai' : 'google' });
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, r, startAngle, endAngle);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+      startAngle = endAngle;
+    }
+
+    // Render legend
+    const legend = container.querySelector('.pie-legend');
+    if (legend) {
+      legend.innerHTML = entries.slice(0, 6).map(([model, cost]) => {
+        const color = _spanColor({ type: 'llm', model, provider: model.includes('claude') ? 'anthropic' : (model.includes('gpt') || model.startsWith('o')) ? 'openai' : 'google' });
+        const pct   = (cost / total * 100).toFixed(1);
+        const short = _shortModelName(model);
+        return `<div class="pie-item"><span class="pie-dot" style="background:${color}"></span><span class="pie-name">${short}</span><span class="pie-pct">${pct}%</span></div>`;
+      }).join('');
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -2118,6 +2302,16 @@ class AcvDetail extends HTMLElement {
       .jv-summary::-webkit-details-marker { display: none; }
       details > summary::before { content: '▶'; font-size: 8px; color: #8b949e; margin-right: 4px; }
       details[open] > summary::before { content: '▼'; }
+
+      /* ---- Pie chart (Summary tab) ---- */
+      .pie-section { margin-top: 12px; padding-top: 8px; border-top: 1px solid #21262d; }
+      .pie-title { font-size: 10px; color: #8b949e; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+      .pie-row { display: flex; align-items: center; gap: 12px; }
+      .pie-legend { display: flex; flex-direction: column; gap: 3px; }
+      .pie-item { display: flex; align-items: center; gap: 4px; font-size: 10px; }
+      .pie-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+      .pie-name { color: #e6edf3; flex: 1; }
+      .pie-pct { color: #8b949e; }
     `;
   }
 }
