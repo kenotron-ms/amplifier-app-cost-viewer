@@ -1451,6 +1451,196 @@ class AcvOverview extends HTMLElement {
 customElements.define('acv-overview', AcvOverview);
 
 // =============================================================================
+// Section 9b: Custom element — AcvBody  (CSS Grid shell with labels)
+// Two-column CSS Grid: 220px labels column + 1fr canvas column.
+// Row 1: sticky ruler wrapper (spans both columns).
+// Row 2: labels column (tree-like labels with depth indentation) + canvas column.
+// Dispatches toggle-expand and session-select CustomEvents on label row clicks.
+// =============================================================================
+
+class AcvBody extends HTMLElement {
+  constructor() {
+    super();
+    this._root = this.attachShadow({ mode: 'open' });
+  }
+
+  connectedCallback() {
+    subscribe(() => this._render());
+    this._render();
+    // Wire scroll tracking on the .grid container — AcvBody is the scroll master
+    // for the v3 grid layout. Pushes scrollTop to state so the canvas can follow.
+    const grid = this._root.querySelector('.grid');
+    if (grid) {
+      grid.addEventListener('scroll', () => {
+        state.scrollTop = grid.scrollTop;
+      });
+    }
+  }
+
+  /** Called externally to trigger a re-render (e.g. after canvas redraws). */
+  notify() {
+    this._render();
+  }
+
+  _render() {
+    const sd = state.sessionData;
+    const rows = sd ? _visibleRowsWithDepth(sd, state.expandedSessions) : [];
+
+    render(html`
+      <style>
+        :host {
+          display: flex;
+          flex-direction: column;
+          flex: 1;
+          overflow: hidden;
+          min-width: 0;
+          box-sizing: border-box;
+          font-family: "SF Mono", Consolas, Monaco, monospace;
+          font-size: 12px;
+          color: var(--text, #e6edf3);
+          background: var(--bg, #0d1117);
+        }
+        .grid {
+          display: grid;
+          grid-template-columns: 220px 1fr;
+          grid-template-rows: auto 1fr;
+          flex: 1;
+          overflow-y: auto;
+          min-height: 0;
+        }
+        /* Ruler wrapper: row 1, spans full width, sticky */
+        .ruler-wrapper {
+          grid-column: 1 / -1;
+          grid-row: 1;
+          position: sticky;
+          top: 0;
+          z-index: 5;
+          display: flex;
+          height: ${RULER_H}px;
+          background: var(--surface, #161b22);
+          border-bottom: 1px solid var(--border, #30363d);
+          box-sizing: border-box;
+        }
+        .ruler-left-blank {
+          width: 220px;
+          flex-shrink: 0;
+          border-right: 1px solid var(--border, #30363d);
+        }
+        .ruler-ticks {
+          flex: 1;
+          position: relative;
+          overflow: hidden;
+        }
+        /* Labels column: grid-column 1, grid-row 2 */
+        .labels-column {
+          grid-column: 1;
+          grid-row: 2;
+          border-right: 1px solid var(--border, #30363d);
+          background: var(--surface, #161b22);
+          overflow: hidden;
+          box-sizing: border-box;
+        }
+        .label-row {
+          display: flex;
+          align-items: center;
+          height: ${ROW_H}px;
+          cursor: pointer;
+          user-select: none;
+          box-sizing: border-box;
+          padding-right: 8px;
+          overflow: hidden;
+          font-size: 11px;
+          font-family: "SF Mono", Consolas, Monaco, monospace;
+        }
+        .label-row:hover {
+          background: var(--surface-alt, #21262d);
+        }
+        .label-toggle {
+          width: 14px;
+          flex-shrink: 0;
+          text-align: center;
+          font-size: 10px;
+        }
+        .label-name {
+          flex: 1;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .label-cost {
+          color: var(--text-muted, #8b949e);
+          font-size: 10px;
+          margin-left: 4px;
+          flex-shrink: 0;
+        }
+        /* Canvas column: grid-column 2, grid-row 2 (Phase 1 placeholder) */
+        .canvas-column {
+          grid-column: 2;
+          grid-row: 2;
+          background: var(--bg, #0d1117);
+          position: relative;
+          overflow: hidden;
+        }
+      </style>
+      <div class="grid">
+        <div class="ruler-wrapper">
+          <div class="ruler-left-blank"></div>
+          <div class="ruler-ticks"></div>
+        </div>
+        <div class="labels-column">
+          ${rows.map(({ node, depth }) => {
+            const hasChildren = (node.children?.length ?? 0) > 0;
+            const isExpanded = state.expandedSessions.has(node.session_id);
+            const toggle = hasChildren ? (isExpanded ? '\u25be' : '\u25b8') : '\u00a0';
+            const cost = node.total_cost_usd || 0;
+            const name = node.name || node.agent_name || node.session_id.slice(-8);
+            return html`
+              <div
+                class="label-row"
+                style=${'padding-left:' + (8 + depth * 14) + 'px'}
+                @click=${() => this._onLabelClick(node.session_id, hasChildren)}
+              >
+                <span class="label-toggle">${toggle}</span>
+                <span class="label-name" title=${node.session_id}>${name}</span>
+                <span class="label-cost">$${cost.toFixed(4)}</span>
+              </div>
+            `;
+          })}
+        </div>
+        <div class="canvas-column"></div>
+      </div>
+      <acv-detail></acv-detail>
+    `, this._root);
+
+    // Re-wire scroll tracking after each render (grid element is recreated by Lit)
+    const grid = this._root.querySelector('.grid');
+    if (grid && !grid._scrollWired) {
+      grid._scrollWired = true;
+      grid.addEventListener('scroll', () => {
+        state.scrollTop = grid.scrollTop;
+      });
+    }
+  }
+
+  _onLabelClick(sid, hasChildren) {
+    if (hasChildren) {
+      this.dispatchEvent(new CustomEvent('toggle-expand', {
+        bubbles: true,
+        composed: true,
+        detail: { id: sid },
+      }));
+    }
+    this.dispatchEvent(new CustomEvent('session-select', {
+      bubbles: true,
+      composed: true,
+      detail: { id: sid },
+    }));
+  }
+}
+
+customElements.define('acv-body', AcvBody);
+
+// =============================================================================
 // Section 10: Custom element — AcvDetail  (full implementation)
 // Detail drawer shown at the bottom when a span is selected.
 // Shadow DOM component with timing, token, cost rows and I/O blocks.

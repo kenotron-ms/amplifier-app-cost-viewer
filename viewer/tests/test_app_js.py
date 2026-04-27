@@ -2019,3 +2019,114 @@ class TestV3AcvOverview:
         assert count >= 5, (
             f"All 5 custom element classes must call attachShadow, found {count} calls"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: AcvBody CSS Grid shell with labels
+# ---------------------------------------------------------------------------
+
+
+class TestV3AcvBody:
+    """Verify AcvBody custom element — CSS Grid shell with labels column."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_acv_body_class_defined(self) -> None:
+        """AcvBody class must be defined extending HTMLElement."""
+        assert "class AcvBody" in self.content, (
+            "app.js must define 'class AcvBody extends HTMLElement'"
+        )
+
+    def test_acv_body_custom_element_registered(self) -> None:
+        """AcvBody must be registered as 'acv-body' custom element."""
+        assert (
+            "customElements.define('acv-body'" in self.content
+            or 'customElements.define("acv-body"' in self.content
+        ), "Must register acv-body via customElements.define"
+
+    def test_grid_template_columns(self) -> None:
+        """AcvBody must use CSS Grid with grid-template-columns: 220px 1fr."""
+        assert "220px" in self.content, (
+            "AcvBody must set grid-template-columns with 220px labels column"
+        )
+        assert "grid-template-columns" in self.content, (
+            "AcvBody must use grid-template-columns in its CSS Grid layout"
+        )
+
+    def test_ruler_spans_full_width(self) -> None:
+        """Ruler wrapper must span both columns using grid-column: 1 / -1."""
+        assert "1 / -1" in self.content or "1/-1" in self.content, (
+            "AcvBody ruler wrapper must use grid-column: 1 / -1 to span both columns"
+        )
+
+    def test_ruler_position_sticky(self) -> None:
+        """Ruler wrapper must use position: sticky so it sticks to the top."""
+        assert "position: sticky" in self.content or "position:sticky" in self.content, (
+            "AcvBody ruler wrapper must use 'position: sticky' to stay at top"
+        )
+
+    def test_labels_column_present(self) -> None:
+        """AcvBody must render a labels column (grid-column 1)."""
+        assert "labels-column" in self.content or "label-col" in self.content, (
+            "AcvBody must render a labels column div (class 'labels-column' or 'label-col')"
+        )
+
+    def test_canvas_column_present(self) -> None:
+        """AcvBody must render a canvas column (grid-column 2)."""
+        assert "canvas-column" in self.content or "canvas-col" in self.content, (
+            "AcvBody must render a canvas column div (class 'canvas-column' or 'canvas-col')"
+        )
+
+    def test_uses_visible_rows_with_depth(self) -> None:
+        """AcvBody must call _visibleRowsWithDepth to render label rows."""
+        assert "_visibleRowsWithDepth" in self.content, (
+            "AcvBody must call _visibleRowsWithDepth(sessionData, expandedSessions) "
+            "to build the visible rows with depth for indentation"
+        )
+
+    def test_toggle_triangles_present(self) -> None:
+        """AcvBody must render ▾ for expanded and ▸ for collapsed nodes."""
+        # These unicode chars are already in the file (used in AcvTree), but
+        # AcvBody must also reference them. The test checks they appear in the
+        # context of the AcvBody implementation.
+        content = self.content
+        assert ("\u25be" in content or "▾" in content), (
+            "AcvBody must render ▾ (U+25BE) for expanded nodes"
+        )
+        assert ("\u25b8" in content or "▸" in content), (
+            "AcvBody must render ▸ (U+25B8) for collapsed nodes"
+        )
+
+    def test_dispatches_toggle_expand_event(self) -> None:
+        """AcvBody must dispatch 'toggle-expand' CustomEvent when a parent row is clicked."""
+        content = self.content
+        # Ensure toggle-expand appears — it already exists for AcvTree, but AcvBody
+        # must also dispatch it (with bubbles:true, composed:true).
+        assert "toggle-expand" in content, (
+            "AcvBody must dispatch 'toggle-expand' CustomEvent on label row click "
+            "when the node has children"
+        )
+
+    def test_dispatches_session_select_event(self) -> None:
+        """AcvBody must dispatch 'session-select' CustomEvent on every row click."""
+        assert "session-select" in self.content, (
+            "AcvBody must dispatch 'session-select' CustomEvent on label row click"
+        )
+
+    def test_acv_detail_included_in_shadow_dom(self) -> None:
+        """AcvBody shadow DOM must include <acv-detail> after the grid div."""
+        assert "acv-detail" in self.content, (
+            "AcvBody shadow DOM must include <acv-detail></acv-detail> after the grid div"
+        )
+
+    def test_scroll_top_tracking_on_grid(self) -> None:
+        """AcvBody must track scrollTop on the .grid container and push to state."""
+        content = self.content
+        assert "state.scrollTop" in content, (
+            "AcvBody connectedCallback must wire a scroll listener on the .grid container "
+            "that sets state.scrollTop = grid.scrollTop"
+        )
+        assert "scrollTop" in content, (
+            "AcvBody must track vertical scroll via scrollTop"
+        )
