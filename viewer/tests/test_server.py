@@ -190,31 +190,34 @@ class TestGetSessionSpans:
         response = client.get("/api/sessions/nonexistent-session-id/spans")
         assert response.status_code == 404
 
-    def test_returns_list(self, client: TestClient) -> None:
-        """Response body is a JSON array."""
+    def test_returns_dict_with_spans_key(self, client: TestClient) -> None:
+        """Response body is a dict with a 'spans' key containing a list."""
         response = client.get(f"/api/sessions/{ROOT_SESSION_ID}/spans")
-        assert isinstance(response.json(), list)
+        data = response.json()
+        assert isinstance(data, dict), f"Expected dict, got {type(data).__name__}"
+        assert "spans" in data, "Response must have 'spans' key"
+        assert isinstance(data["spans"], list)
 
     def test_returns_spans_from_all_three_sessions_count_3(
         self, client: TestClient
     ) -> None:
         """Flat span list collects one span from each of the 3 sessions (root + 2 children)."""
         response = client.get(f"/api/sessions/{ROOT_SESSION_ID}/spans")
-        spans = response.json()
+        spans = response.json()["spans"]
         # Fixture has 1 llm span per session × 3 sessions = 3 spans total
         assert len(spans) == 3
 
     def test_each_span_has_session_id_field(self, client: TestClient) -> None:
         """Every span in the flat list carries a 'session_id' field."""
         response = client.get(f"/api/sessions/{ROOT_SESSION_ID}/spans")
-        spans = response.json()
+        spans = response.json()["spans"]
         for span in spans:
             assert "session_id" in span
 
     def test_each_span_has_depth_field(self, client: TestClient) -> None:
         """Every span in the flat list carries a 'depth' field."""
         response = client.get(f"/api/sessions/{ROOT_SESSION_ID}/spans")
-        spans = response.json()
+        spans = response.json()["spans"]
         for span in spans:
             assert "depth" in span
 
@@ -223,7 +226,7 @@ class TestGetSessionSpans:
     ) -> None:
         """Root session spans have depth == 0; child session spans have depth == 1."""
         response = client.get(f"/api/sessions/{ROOT_SESSION_ID}/spans")
-        spans = response.json()
+        spans = response.json()["spans"]
 
         root_spans = [s for s in spans if s["session_id"] == ROOT_SESSION_ID]
         child_spans = [
@@ -534,8 +537,12 @@ def test_session_detail_token_counts_nonzero(client: TestClient) -> None:
     response = client.get(f"/api/sessions/{ROOT_SESSION_ID}")
     assert response.status_code == 200
     body = response.json()
-    assert "total_input_tokens" in body, "total_input_tokens must be present in session detail"
-    assert "total_output_tokens" in body, "total_output_tokens must be present in session detail"
+    assert "total_input_tokens" in body, (
+        "total_input_tokens must be present in session detail"
+    )
+    assert "total_output_tokens" in body, (
+        "total_output_tokens must be present in session detail"
+    )
     assert body["total_input_tokens"] > 0, (
         f"total_input_tokens must be > 0 after span loading, got {body['total_input_tokens']}"
     )

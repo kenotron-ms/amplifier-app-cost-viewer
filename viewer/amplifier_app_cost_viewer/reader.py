@@ -97,22 +97,38 @@ def _offset_ms(ts_str: str, root_start_ms: int) -> int:
     return _ts_to_ms(ts_str) - root_start_ms
 
 
-def _read_events(events_path: Path) -> list[dict]:
-    """Read all valid JSON lines from events_path.
+# KNOWN events that are large and never contribute to spans — skip them
+_SKIP_EVENTS: frozenset[bytes] = frozenset(
+    [
+        b'"llm:request"',
+        b'"session:resume"',
+        b'"context:snapshot"',
+    ]
+)
 
-    Skips blank lines and lines with invalid JSON.  Catches OSError so callers
-    get an empty list when the file is missing or unreadable.
+
+def _read_events(events_path: Path) -> list[dict]:
+    """Read events from a JSONL file, skipping large unused event types.
+
+    Streams line-by-line so the entire file is never loaded into RAM.
+    Lines containing known-useless event types (llm:request, session:resume,
+    context:snapshot) are skipped BEFORE JSON parsing for maximum speed.
     """
     events: list[dict] = []
     try:
-        for line in events_path.read_text().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                events.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+        with events_path.open("rb") as f:
+            for raw in f:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                # Cheap byte-level check before JSON parsing.
+                # All skipped events are large and contribute nothing to spans.
+                if any(skip in raw for skip in _SKIP_EVENTS):
+                    continue
+                try:
+                    events.append(json.loads(raw))
+                except json.JSONDecodeError:
+                    continue
     except OSError:
         pass
     return events

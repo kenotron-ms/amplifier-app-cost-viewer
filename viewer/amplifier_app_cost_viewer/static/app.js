@@ -214,10 +214,49 @@ async function fetchSession(id) {
   state.sessionData = await resp.json();
 }
 
-async function fetchSpans(id) {
-  const resp = await fetch(`/api/sessions/${encodeURIComponent(id)}/spans`);
+async function fetchSpans(id, onlyRoot = false) {
+  const url = `/api/sessions/${encodeURIComponent(id)}/spans${onlyRoot ? '?only_root=true' : ''}`;
+  const resp = await fetch(url);
   if (!resp.ok) throw new Error(`GET /api/sessions/${id}/spans → ${resp.status}`);
-  state.spans = await resp.json();
+  const data = await resp.json();
+  // Merge spans (not replace) so progressive loading accumulates
+  const existingBySession = new Set(state.spans.map(s => s.session_id));
+  const newSpans = (data.spans || []).filter(s => !existingBySession.has(s.session_id));
+  state.spans = [...state.spans, ...newSpans];
+}
+
+async function _loadChildSpansProgressively(rootId) {
+  // Load spans for immediate children in small batches
+  const root = state.sessionData;
+  if (!root || !root.children) return;
+
+  const BATCH_SIZE = 10;
+  const children = root.children || [];
+
+  for (let i = 0; i < children.length; i += BATCH_SIZE) {
+    const batch = children.slice(i, i + BATCH_SIZE);
+    // Fetch each child's spans in parallel within the batch
+    await Promise.all(batch.map(async child => {
+      try {
+        const url = `/api/sessions/${encodeURIComponent(rootId)}/child-spans/${encodeURIComponent(child.session_id)}`;
+        const resp = await fetch(url);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        // Merge new spans
+        const existing = new Set(state.spans.map(s => s.session_id));
+        const newSpans = (data.spans || []).filter(s => !existing.has(s.session_id));
+        if (newSpans.length > 0) {
+          state.spans = [...state.spans, ...newSpans];
+          state.totalDurationMs = state.spans.reduce((m, s) => Math.max(m, s.end_ms || 0), state.totalDurationMs);
+          // Trigger a canvas redraw without full re-render (efficient)
+          const body = document.querySelector('acv-body');
+          if (body && typeof body.notify === 'function') body.notify();
+        }
+      } catch (_) {}
+    }));
+    // Small yield between batches so UI stays responsive
+    await new Promise(r => setTimeout(r, 10));
+  }
 }
 
 // =============================================================================
@@ -1802,31 +1841,26 @@ customElements.define('acv-detail', AcvDetail);
 
 async function loadSession(id) {
   state.loading = true;
+  state.spans = [];
   renderAll();
-
   try {
     state.activeSessionId = id;
     state.selectedSpan = null;
-
-    // Fetch session data and spans in parallel
-    await Promise.all([fetchSession(id), fetchSpans(id)]);
-
-    // Auto-expand root and first-level children
-    state.expandedSessions.clear();
-    state.expandedSessions.add(id);
-    if (state.sessionData?.children) {
-      for (const c of state.sessionData.children) {
-        state.expandedSessions.add(c.session_id);
-      }
-    }
-
-    // Compute total duration and set viewport to show the full session
+    // Load session tree + ROOT spans only first — fast first paint
+    await Promise.all([
+      fetchSession(id),
+      fetchSpans(id, true),  // only_root=true
+    ]);
     state.totalDurationMs = state.spans.reduce((m, s) => Math.max(m, s.end_ms || 0), 1000);
     setViewport(0, state.totalDurationMs, false);
+    // Expand root by default
+    state.expandedSessions = new Set([id]);
   } finally {
     state.loading = false;
     renderAll();
   }
+  // Now load child spans in the background — don't block initial paint
+  _loadChildSpansProgressively(id);
 }
 
 // =============================================================================

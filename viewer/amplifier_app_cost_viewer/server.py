@@ -185,28 +185,66 @@ def _parse_all_spans_for_node(node: SessionNode, root_start_ms: int) -> None:
     aggregate_costs(node)
 
 
-def _load_session(session_id: str) -> SessionNode | None:
-    """Return a fully span-loaded root node, using the cache where possible.
+def _find_node(root: SessionNode, session_id: str) -> SessionNode | None:
+    """DFS search for a node by session_id."""
+    if root.session_id == session_id:
+        return root
+    for child in root.children:
+        result = _find_node(child, session_id)
+        if result is not None:
+            return result
+    return None
 
-    1. Finds the root node for session_id.
-    2. Returns cached loaded node if already in _loaded_cache.
-    3. Otherwise calls parse_spans for the root and all descendants,
-       stores the result in _loaded_cache, and returns it.
+
+def _get_root_start_ms(root: SessionNode) -> int:
+    """Get Unix ms for the root session's start event."""
+    if root.events_path and root.events_path.exists():
+        try:
+            return _reader.normalize_timestamps(root.events_path)
+        except (ValueError, OSError):
+            pass
+    return 0
+
+
+def _load_session(session_id: str, only_root: bool = False) -> SessionNode | None:
+    """Return a span-loaded root node, using the cache where possible.
+
+    When only_root=False (default):
+      1. Returns cached fully-loaded node if present.
+      2. Otherwise parses all spans recursively, caches, and returns.
+
+    When only_root=True (fast path for first paint):
+      1. Returns cached node if already fully loaded.
+      2. Otherwise parses ONLY the root node's own spans (skipping children).
+         The partial result is NOT cached, so a subsequent full load works correctly.
     """
     global _loaded_cache
     root = _find_root(session_id)
     if root is None:
         return None
+
+    # If a full load is already cached, return it (serves both only_root cases)
     if root.session_id in _loaded_cache:
         return _loaded_cache[root.session_id]
-    # Compute root_start_ms from the root's events file
-    if root.events_path and root.events_path.exists():
-        try:
-            root_start_ms = _reader.normalize_timestamps(root.events_path)
-        except (ValueError, OSError):
-            root_start_ms = 0
-    else:
-        root_start_ms = 0
+
+    root_start_ms = _get_root_start_ms(root)
+
+    if only_root:
+        # Fast path: parse only the root node's own events file
+        if root.events_path and root.events_path.exists():
+            try:
+                root.spans = _reader.parse_spans(
+                    root.events_path, root_start_ms, root_start_ms
+                )
+                root.cost_usd = sum(s.cost_usd for s in root.spans)
+                root.total_input_tokens = sum(s.input_tokens for s in root.spans)
+                root.total_output_tokens = sum(s.output_tokens for s in root.spans)
+            except (ValueError, OSError):
+                pass
+        # Do NOT cache — children are still unloaded
+        return root
+
+    # Full load: parse all spans recursively, then cache
     _parse_all_spans_for_node(root, root_start_ms)
     _loaded_cache[root.session_id] = root
     return root
@@ -261,9 +299,50 @@ def get_session(session_id: str) -> dict:
 
 
 @app.get("/api/sessions/{session_id}/spans")
-def get_session_spans(session_id: str) -> list[dict]:
-    """Return flattened spans from session_id and all descendants, with depth."""
-    root = _load_session(session_id)
+def get_spans(session_id: str, only_root: bool = False) -> dict:
+    """Return spans for a session tree.
+
+    If only_root=true, only parses the root node's events.jsonl (fast path for
+    first paint).  Child spans can be loaded separately via the child-spans
+    endpoint.  Returns a dict with 'spans', 'partial', and 'session_id' keys.
+    """
+    root = _load_session(session_id, only_root=only_root)
     if root is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    return _flatten_spans(root, depth=0)
+    if only_root:
+        spans_out: list[dict[str, Any]] = [
+            _span_to_dict(s, root.session_id, 0) for s in root.spans
+        ]
+    else:
+        spans_out = _flatten_spans(root, depth=0)
+    return {"spans": spans_out, "partial": only_root, "session_id": session_id}
+
+
+@app.get("/api/sessions/{session_id}/child-spans/{child_session_id}")
+def get_child_spans(session_id: str, child_session_id: str) -> dict:
+    """Return spans for one specific child session within a parent tree.
+
+    Used for lazy loading: when the user expands a sub-session, fetch only that
+    one child's spans rather than the entire tree.
+    """
+    root = _find_root(session_id)
+    if root is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
+
+    # Find the child node anywhere in the tree
+    child = _find_node(root, child_session_id)
+    if child is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Child {child_session_id!r} not found in tree",
+        )
+
+    # Parse spans for this child (and its children) if not already cached
+    if child.session_id not in _loaded_cache:
+        root_start_ms = _get_root_start_ms(root)
+        _parse_all_spans_for_node(child, root_start_ms)
+        _loaded_cache[child.session_id] = child
+
+    # Children of root are at depth=1; their children at depth=2, etc.
+    spans_out = _flatten_spans(child, depth=1)
+    return {"spans": spans_out, "session_id": child_session_id}
