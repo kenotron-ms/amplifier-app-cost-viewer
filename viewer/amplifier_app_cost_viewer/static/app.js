@@ -1467,14 +1467,7 @@ class AcvBody extends HTMLElement {
   connectedCallback() {
     subscribe(() => this._render());
     this._render();
-    // Wire scroll tracking on the .grid container — AcvBody is the scroll master
-    // for the v3 grid layout. Pushes scrollTop to state so the canvas can follow.
-    const grid = this._root.querySelector('.grid');
-    if (grid) {
-      grid.addEventListener('scroll', () => {
-        state.scrollTop = grid.scrollTop;
-      });
-    }
+    // Scroll wiring is handled inside _render() via _scrollWired guard
   }
 
   /** Called externally to trigger a re-render (e.g. after canvas redraws). */
@@ -1612,7 +1605,7 @@ class AcvBody extends HTMLElement {
       <acv-detail></acv-detail>
     `, this._root);
 
-    // Re-wire scroll tracking after each render (grid element is recreated by Lit)
+    // Wire scroll tracking once (Lit reuses the .grid element; guard prevents double-registration)
     const grid = this._root.querySelector('.grid');
     if (grid && !grid._scrollWired) {
       grid._scrollWired = true;
