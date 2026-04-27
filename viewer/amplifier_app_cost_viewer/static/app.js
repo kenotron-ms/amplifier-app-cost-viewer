@@ -668,10 +668,10 @@ class AcvBody extends HTMLElement {
     requestAnimationFrame(() => {
       this.#ensureCanvases();
       this.#scheduleRedraw();
-      const grid = this._root.querySelector('.grid');
-      if (grid) {
-        grid.addEventListener('scroll', () => {
-          state.scrollTop = grid.scrollTop;
+      const wrap = this._root.getElementById('table-wrap');
+      if (wrap) {
+        wrap.addEventListener('scroll', () => {
+          state.scrollTop = wrap.scrollTop;
           this.#scheduleRedraw();
         });
       }
@@ -703,109 +703,115 @@ class AcvBody extends HTMLElement {
           color: var(--text, #e6edf3);
           background: var(--bg, #0d1117);
         }
-        .grid {
-          display: grid;
-          grid-template-columns: 220px 1fr;
-          grid-template-rows: auto 1fr;
-          flex: 1;
+        .table-wrap {
+          position: relative;
           overflow-y: auto;
+          overflow-x: hidden;
+          flex: 1;
           min-height: 0;
         }
-        /* Ruler wrapper: row 1, spans full width, sticky */
-        .ruler-wrapper {
-          grid-column: 1 / -1;
-          grid-row: 1;
-          position: sticky;
-          top: 0;
-          z-index: 5;
-          display: flex;
-          height: ${RULER_H}px;
-          background: var(--surface, #161b22);
-          border-bottom: 1px solid var(--border, #30363d);
-          box-sizing: border-box;
+        table {
+          border-collapse: collapse;
+          width: 100%;
+          table-layout: fixed;
         }
-        .ruler-left-blank {
-          width: 220px;
-          flex-shrink: 0;
-          border-right: 1px solid var(--border, #30363d);
+        col.col-label { width: 220px; }
+        col.col-canvas { width: auto; }
+        .th-label {
+          position: sticky; left: 0; top: 0; z-index: 3;
+          width: 220px; height: ${RULER_H}px;
+          background: #161b22;
+          border-right: 1px solid #30363d;
+          border-bottom: 1px solid #30363d;
         }
-        /* Labels column: grid-column 1, grid-row 2 */
-        .labels-column {
-          grid-column: 1;
-          grid-row: 2;
-          border-right: 1px solid var(--border, #30363d);
-          background: var(--surface, #161b22);
-          overflow: hidden;
-          box-sizing: border-box;
+        .th-ruler {
+          position: sticky; top: 0; z-index: 2;
+          height: ${RULER_H}px; padding: 0;
+          background: #161b22;
+          border-bottom: 1px solid #30363d;
         }
-        .label-row {
-          display: flex;
-          align-items: center;
-          height: ${ROW_H}px;
+        .th-ruler canvas { display: block; width: 100%; height: ${RULER_H}px; }
+        .td-label {
+          position: sticky; left: 0; z-index: 1;
+          height: ${ROW_H}px; width: 220px;
+          padding: 0 8px;
+          font-size: 11px; font-family: "SF Mono", Consolas, Monaco, monospace;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          border-right: 1px solid #30363d;
+          border-bottom: 1px solid #21262d;
+          color: #e6edf3;
+          vertical-align: middle;
           cursor: pointer;
           user-select: none;
-          box-sizing: border-box;
-          padding-right: 8px;
-          overflow: hidden;
-          font-size: 11px;
-          font-family: "SF Mono", Consolas, Monaco, monospace;
         }
-        .label-row:hover {
-          background: var(--surface-alt, #21262d);
-        }
-        .label-toggle {
+        .td-label:hover { filter: brightness(1.15); }
+        .td-label .label-toggle {
+          display: inline-block;
           width: 14px;
-          flex-shrink: 0;
           text-align: center;
           font-size: 10px;
+          flex-shrink: 0;
         }
-        .label-name {
-          flex: 1;
+        .td-label .label-name {
+          display: inline;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-        .label-cost {
-          color: var(--text-muted, #8b949e);
+        .td-label .label-cost {
+          float: right;
+          color: #3fb950;
           font-size: 10px;
           margin-left: 4px;
-          flex-shrink: 0;
         }
-        /* Canvas column: grid-column 2, grid-row 2 */
-        .canvas-column {
-          grid-column: 2;
-          grid-row: 2;
-          background: var(--bg, #0d1117);
-          position: relative;
-          overflow: hidden;
+        .td-canvas {
+          height: ${ROW_H}px; padding: 0;
+          border-bottom: 1px solid #21262d;
         }
+        #main-canvas {
+          position: absolute;
+          top: ${RULER_H}px;
+          left: 220px;
+          cursor: grab;
+          display: block;
+        }
+        #main-canvas.dragging { cursor: grabbing; }
       </style>
-      <div class="grid">
-        <div class="ruler-wrapper">
-          <div class="ruler-left-blank"></div>
-          <canvas id="ruler-canvas" style="flex: 1; display: block;"></canvas>
-        </div>
-        <div class="labels-column">
-          ${rows.map(({ node, depth }) => {
-            const hasChildren = (node.children?.length ?? 0) > 0;
-            const isExpanded = state.expandedSessions.has(node.session_id);
-            const toggle = hasChildren ? (isExpanded ? '▾' : '▸') : '\u00a0';
-            const cost = node.total_cost_usd || 0;
-            const name = node.name || node.agent_name || node.session_id.slice(-8);
-            return html`
-              <div
-                class="label-row"
-                style=${'padding-left:' + (8 + depth * 14) + 'px'}
-                @click=${() => this._onLabelClick(node.session_id, hasChildren)}
-              >
-                <span class="label-toggle">${toggle}</span>
-                <span class="label-name" title=${node.session_id}>${name}</span>
-                <span class="label-cost">$${cost.toFixed(4)}</span>
-              </div>
-            `;
-          })}
-        </div>
-        <canvas id="main-canvas" style="grid-column: 2; grid-row: 2; display: block; cursor: grab;"></canvas>
+      <div class="table-wrap" id="table-wrap">
+        <table>
+          <colgroup>
+            <col class="col-label">
+            <col class="col-canvas">
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="th-label"></th>
+              <th class="th-ruler"><canvas id="ruler-canvas"></canvas></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(({ node, depth }, i) => {
+              const hasChildren = (node.children?.length ?? 0) > 0;
+              const isExpanded = state.expandedSessions.has(node.session_id);
+              const toggle = hasChildren ? (isExpanded ? '▾' : '▸') : '\u00a0';
+              const cost = node.total_cost_usd || 0;
+              const name = node.name || node.agent_name || node.session_id.slice(-8);
+              const bg = i % 2 === 0 ? '#0d1117' : '#161b22';
+              const indent = 8 + depth * 14;
+              return html`
+                <tr>
+                  <td
+                    class="td-label"
+                    style="padding-left: ${indent}px; background: ${bg};"
+                    title=${node.session_id}
+                    @click=${() => this._onLabelClick(node.session_id, hasChildren)}
+                  ><span class="label-cost">$${cost.toFixed(4)}</span><span class="label-toggle">${toggle}</span><span class="label-name">${name}</span></td>
+                  <td class="td-canvas" style="background: ${bg};"></td>
+                </tr>`;
+            })}
+          </tbody>
+        </table>
+        <canvas id="main-canvas"></canvas>
       </div>
       <acv-detail></acv-detail>
     `, this._root);
@@ -832,9 +838,9 @@ class AcvBody extends HTMLElement {
     const rows = state.sessionData
       ? _rowIndexMap(state.sessionData, state.expandedSessions).size
       : 0;
-    const gridEl = this._root.querySelector('.grid');
-    if (gridEl) {
-      const bodyW = gridEl.clientWidth - 220;
+    const tableWrap = this._root.getElementById('table-wrap');
+    if (tableWrap) {
+      const bodyW = tableWrap.clientWidth - 220;
       const bodyH = Math.max(rows * ROW_H, 32);
       const needsMcResize =
         mc.width  !== Math.floor(bodyW * dpr) ||
@@ -884,8 +890,6 @@ class AcvBody extends HTMLElement {
     const rowMap   = state.sessionData
       ? _rowIndexMap(state.sessionData, state.expandedSessions)
       : new Map();
-    const scrollTop = state.scrollTop || 0;
-
     // Loading overlay
     if (state.loading) {
       ctx.fillStyle = '#0d1117';
@@ -898,10 +902,10 @@ class AcvBody extends HTMLElement {
       return;
     }
 
-    // Alternating row backgrounds
+    // Alternating row backgrounds — canvas is absolute and scrolls with container,
+    // so row positions are absolute (no scrollTop subtraction needed).
     for (const [, rowIdx] of rowMap) {
-      const y = rowIdx * ROW_H - scrollTop;
-      if (y + ROW_H < 0 || y > H) continue;
+      const y = rowIdx * ROW_H;
       ctx.fillStyle = rowIdx % 2 === 0 ? '#0d1117' : '#161b22';
       ctx.fillRect(0, y, W, ROW_H);
     }
@@ -932,8 +936,8 @@ class AcvBody extends HTMLElement {
     for (const span of state.spans) {
       const rowIdx = rowMap.get(span.session_id);
       if (rowIdx === undefined) continue;
-      const y = rowIdx * ROW_H - scrollTop + (ROW_H - SPAN_H) / 2;
-      if (y + SPAN_H < -4 || y > H + 4) continue;
+      const y = rowIdx * ROW_H + (ROW_H - SPAN_H) / 2;
+      if (y + SPAN_H < 0 || y > H + SPAN_H) continue;
       const x = timeToPixel(span.start_ms || 0, W);
       const w = Math.max(2, timeToPixel(span.end_ms || 0, W) - x);
       if (x + w < -10 || x > W + 4) continue;
@@ -958,8 +962,8 @@ class AcvBody extends HTMLElement {
       const x = timeToPixel(span.start_ms || 0, W);
       const w = timeToPixel(span.end_ms || 0, W) - x;
       if (w < 60) continue;
-      const y = rowIdx * ROW_H - scrollTop + ROW_H / 2;
-      if (y < -4 || y > H + 4) continue;
+      const y = rowIdx * ROW_H + ROW_H / 2;
+      if (y < 0 || y > H + ROW_H) continue;
       const label = span.type === 'llm'
         ? `${span.model || ''} \u00b7 $${(span.cost_usd || 0).toFixed(3)}`
         : (span.tool_name || span.type || '');
@@ -1045,12 +1049,12 @@ class AcvBody extends HTMLElement {
     canvas.addEventListener('mouseup',    e => { if (this.#hasDragged) e.stopPropagation(); stopDrag(); });
     canvas.addEventListener('mouseleave', stopDrag);
 
-    // Cmd/Ctrl + scroll → zoom; plain scroll → route to grid
+    // Cmd/Ctrl + scroll → zoom; plain scroll → route to table-wrap
     canvas.addEventListener('wheel', e => {
       if (!e.ctrlKey && !e.metaKey) {
-        // Vertical scroll: forward to the scrollable grid container
-        const grid = this._root.querySelector('.grid');
-        if (grid) grid.scrollTop += e.deltaY;
+        // Vertical scroll: forward to the scrollable table-wrap container
+        const wrap = this._root.getElementById('table-wrap');
+        if (wrap) wrap.scrollTop += e.deltaY;
         e.preventDefault();
         return;
       }
@@ -1077,7 +1081,7 @@ class AcvBody extends HTMLElement {
       const rect     = canvas.getBoundingClientRect();
       const clickX   = e.clientX - rect.left;
       const clickMs  = pixelToTime(clickX, W);
-      const clickY   = e.clientY - rect.top + (state.scrollTop || 0);
+      const clickY   = e.clientY - rect.top;
       const rowMap   = state.sessionData
         ? _rowIndexMap(state.sessionData, state.expandedSessions)
         : new Map();

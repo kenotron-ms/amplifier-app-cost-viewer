@@ -1518,19 +1518,16 @@ class TestV3AcvBody:
             or 'customElements.define("acv-body"' in self.content
         ), "Must register acv-body via customElements.define"
 
-    def test_grid_template_columns(self) -> None:
-        """AcvBody must use CSS Grid with grid-template-columns: 220px 1fr."""
+    def test_label_column_width(self) -> None:
+        """AcvBody must declare a 220px label column."""
         assert "220px" in self.content, (
-            "AcvBody must set grid-template-columns with 220px labels column"
-        )
-        assert "grid-template-columns" in self.content, (
-            "AcvBody must use grid-template-columns in its CSS Grid layout"
+            "AcvBody must declare a 220px wide label column (col.col-label or equivalent)"
         )
 
     def test_ruler_spans_full_width(self) -> None:
-        """Ruler wrapper must span both columns using grid-column: 1 / -1."""
-        assert "1 / -1" in self.content or "1/-1" in self.content, (
-            "AcvBody ruler wrapper must use grid-column: 1 / -1 to span both columns"
+        """Ruler header row must span both columns via <thead>."""
+        assert "<thead" in self.content, (
+            "AcvBody must use <thead> so the ruler row spans the full table width"
         )
 
     def test_ruler_position_sticky(self) -> None:
@@ -1540,15 +1537,15 @@ class TestV3AcvBody:
         ), "AcvBody ruler wrapper must use 'position: sticky' to stay at top"
 
     def test_labels_column_present(self) -> None:
-        """AcvBody must render a labels column (grid-column 1)."""
-        assert "labels-column" in self.content or "label-col" in self.content, (
-            "AcvBody must render a labels column div (class 'labels-column' or 'label-col')"
+        """AcvBody must render a sticky left-column label cell."""
+        assert "td-label" in self.content or "labels-column" in self.content or "label-col" in self.content, (
+            "AcvBody must render label cells (class 'td-label', 'labels-column', or 'label-col')"
         )
 
     def test_canvas_column_present(self) -> None:
-        """AcvBody must render a canvas column (grid-column 2)."""
-        assert "canvas-column" in self.content or "canvas-col" in self.content, (
-            "AcvBody must render a canvas column div (class 'canvas-column' or 'canvas-col')"
+        """AcvBody must render a right-side canvas area."""
+        assert "td-canvas" in self.content or "canvas-column" in self.content or "canvas-col" in self.content, (
+            "AcvBody must render canvas column cells (class 'td-canvas', 'canvas-column', or 'canvas-col')"
         )
 
     def test_uses_visible_rows_with_depth(self) -> None:
@@ -1817,4 +1814,51 @@ def test_canvas_resize_checks_both_dimensions(app_js_code: str) -> None:
     assert "needsMcResize" in app_js_code or "mc.height !== " in app_js_code, (
         "#ensureCanvases() must check BOTH mc.width AND mc.height when deciding "
         "whether to resize (use needsMcResize variable or 'mc.height !== ' check)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests: HTML table layout (replaces CSS Grid hack in AcvBody)
+# ---------------------------------------------------------------------------
+
+
+def test_acv_body_uses_table(app_js_code: str) -> None:
+    """AcvBody must use an HTML table, not a CSS grid."""
+    assert "<table" in app_js_code, "AcvBody must render a <table> element"
+    assert "<thead" in app_js_code, "AcvBody must render a <thead> element"
+    assert "<tbody" in app_js_code, "AcvBody must render a <tbody> element"
+
+
+def test_left_column_is_sticky(app_js_code: str) -> None:
+    """Left column <td> must be position: sticky; left: 0."""
+    assert "position: sticky" in app_js_code, (
+        "AcvBody left column must use 'position: sticky'"
+    )
+    assert "left: 0" in app_js_code, (
+        "AcvBody left column must use 'left: 0' for sticky positioning"
+    )
+
+
+def test_ruler_thead_sticky_top(app_js_code: str) -> None:
+    """Ruler <thead> row must be position: sticky; top: 0."""
+    assert "top: 0" in app_js_code, (
+        "AcvBody ruler header must use 'top: 0' for sticky top positioning"
+    )
+
+
+def test_canvas_position_absolute_in_table_wrap(app_js_code: str) -> None:
+    """Main canvas must be position: absolute inside the scrollable table-wrap."""
+    assert "position: absolute" in app_js_code, (
+        "AcvBody main-canvas must use 'position: absolute' to overlay the right column"
+    )
+    assert "table-wrap" in app_js_code, (
+        "AcvBody must have a 'table-wrap' scroll container"
+    )
+
+
+def test_no_css_grid_in_acv_body(app_js_code: str) -> None:
+    """AcvBody must NOT use CSS grid-template-columns: 220px (the old two-column grid hack)."""
+    assert "grid-template-columns: 220px" not in app_js_code, (
+        "AcvBody must NOT use 'grid-template-columns: 220px' — "
+        "the CSS grid two-column approach has been replaced by an HTML table"
     )
