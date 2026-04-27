@@ -616,10 +616,10 @@ class AcvOverview extends HTMLElement {
   #ctx = null;
   #rafId = null;
   #resizeObserver = null;
-  // drag fields declared upfront for Task 3
+  // drag interaction state (reset per mousedown)
   #dragMode = null;
   #dragStartX = 0;
-  #dragStartMs = 0;
+  #dragStartMs = null;
 
   constructor() {
     super();
