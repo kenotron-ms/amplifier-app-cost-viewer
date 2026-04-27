@@ -1890,3 +1890,30 @@ def test_disconnected_callback_cleans_up(app_js_code: str) -> None:
     """disconnectedCallback must disconnect ResizeObserver and cancel RAF."""
     assert "disconnectedCallback" in app_js_code
     assert "disconnect()" in app_js_code
+
+
+# ---------------------------------------------------------------------------
+# Tests: Pixel-accurate canvas positioning — measure actual row/thead height
+# ---------------------------------------------------------------------------
+
+
+def test_actual_row_height_field(app_js_code: str) -> None:
+    """AcvBody must store measured row height separately from the ROW_H constant."""
+    assert "#rowH" in app_js_code or "_rowH" in app_js_code
+
+
+def test_actual_thead_height_field(app_js_code: str) -> None:
+    """AcvBody must store measured thead height for canvas top positioning."""
+    assert "#theadH" in app_js_code or "_theadH" in app_js_code
+
+
+def test_canvas_top_uses_measured_thead(app_js_code: str) -> None:
+    """Canvas top must be set from measured thead height, not hardcoded RULER_H."""
+    assert "this.#theadH" in app_js_code or "this._theadH" in app_js_code
+    # Must not hardcode top to RULER_H constant
+    assert "top: ${RULER_H}px" not in app_js_code
+
+
+def test_draw_uses_measured_row_height(app_js_code: str) -> None:
+    """#draw() must use measured row height, not the ROW_H constant for y positions."""
+    assert "this.#rowH" in app_js_code or "this._rowH" in app_js_code

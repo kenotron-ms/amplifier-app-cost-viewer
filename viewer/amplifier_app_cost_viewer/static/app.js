@@ -657,6 +657,8 @@ class AcvBody extends HTMLElement {
   #dragStartViewportEnd = 0;
   #isDragging = false;
   #hasDragged = false;
+  #rowH   = ROW_H;    // actual rendered table row height (measured, may differ from ROW_H)
+  #theadH = RULER_H;  // actual rendered thead height (measured, may differ from RULER_H)
 
   constructor() {
     super();
@@ -786,8 +788,6 @@ class AcvBody extends HTMLElement {
         }
         #main-canvas {
           position: absolute;
-          top: ${RULER_H}px;
-          left: 220px;
           cursor: grab;
           display: block;
         }
@@ -897,6 +897,22 @@ class AcvBody extends HTMLElement {
       this.#rulerCanvas = rc;
     }
 
+    // Measure actual rendered dimensions — border-bottom adds pixels the constant doesn't know about
+    const theadEl = this._root.querySelector('thead');
+    const firstTr = tbody.querySelector('tr');
+    if (theadEl) {
+      const measured = Math.round(theadEl.getBoundingClientRect().height);
+      if (measured > 0) this.#theadH = measured;
+    }
+    if (firstTr) {
+      const measured = Math.round(firstTr.getBoundingClientRect().height);
+      if (measured > 0) this.#rowH = measured;
+    }
+
+    // Position canvas using measured thead height, not hardcoded RULER_H
+    mc.style.top  = this.#theadH + 'px';
+    mc.style.left = '220px';
+
     // Wire events once
     if (!mc._v3wired) { this.#wireCanvasEvents(mc); mc._v3wired = true; }
     if (!rc._v3wired) { this.#wireRulerEvents(rc);  rc._v3wired = true; }
@@ -940,9 +956,9 @@ class AcvBody extends HTMLElement {
     // Alternating row backgrounds — canvas is absolute and scrolls with container,
     // so row positions are absolute (no scrollTop subtraction needed).
     for (const [, rowIdx] of rowMap) {
-      const y = rowIdx * ROW_H;
+      const y = rowIdx * this.#rowH;
       ctx.fillStyle = rowIdx % 2 === 0 ? '#0d1117' : '#161b22';
-      ctx.fillRect(0, y, W, ROW_H);
+      ctx.fillRect(0, y, W, this.#rowH);
     }
 
     if (!state.spans || state.spans.length === 0) return;
@@ -971,7 +987,7 @@ class AcvBody extends HTMLElement {
     for (const span of state.spans) {
       const rowIdx = rowMap.get(span.session_id);
       if (rowIdx === undefined) continue;
-      const y = rowIdx * ROW_H + (ROW_H - SPAN_H) / 2;
+      const y = rowIdx * this.#rowH + (this.#rowH - SPAN_H) / 2;
       if (y + SPAN_H < 0 || y > H + SPAN_H) continue;
       const x = timeToPixel(span.start_ms || 0, W);
       const w = Math.max(2, timeToPixel(span.end_ms || 0, W) - x);
@@ -997,8 +1013,8 @@ class AcvBody extends HTMLElement {
       const x = timeToPixel(span.start_ms || 0, W);
       const w = timeToPixel(span.end_ms || 0, W) - x;
       if (w < 60) continue;
-      const y = rowIdx * ROW_H + ROW_H / 2;
-      if (y < 0 || y > H + ROW_H) continue;
+      const y = rowIdx * this.#rowH + this.#rowH / 2;
+      if (y < 0 || y > H + this.#rowH) continue;
       const label = span.type === 'llm'
         ? `${span.model || ''} \u00b7 $${(span.cost_usd || 0).toFixed(3)}`
         : (span.tool_name || span.type || '');
@@ -1121,7 +1137,7 @@ class AcvBody extends HTMLElement {
       const rowMap   = state.sessionData
         ? _rowIndexMap(state.sessionData, state.expandedSessions)
         : new Map();
-      const clickRow = Math.floor(clickY / ROW_H);
+      const clickRow = Math.floor(clickY / this.#rowH);
       let hit = null;
       for (const span of (state.spans || [])) {
         const rowIdx = rowMap.get(span.session_id);
