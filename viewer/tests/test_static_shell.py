@@ -158,19 +158,14 @@ class TestIndexHtmlBody:
             "Must have <acv-toolbar id='toolbar'>"
         )
 
-    def test_main_element(self) -> None:
-        assert _has_element(self.collector, "main", id="main"), (
-            "Must have <main id='main'>"
+    def test_acv_overview_element(self) -> None:
+        assert _has_element(self.collector, "acv-overview", id="overview"), (
+            "Must have <acv-overview id='overview'>"
         )
 
-    def test_acv_tree_element(self) -> None:
-        assert _has_element(self.collector, "acv-tree", id="tree"), (
-            "Must have <acv-tree id='tree'>"
-        )
-
-    def test_acv_timeline_element(self) -> None:
-        assert _has_element(self.collector, "acv-timeline", id="timeline"), (
-            "Must have <acv-timeline id='timeline'>"
+    def test_acv_body_element(self) -> None:
+        assert _has_element(self.collector, "acv-body", id="body"), (
+            "Must have <acv-body id='body'>"
         )
 
 

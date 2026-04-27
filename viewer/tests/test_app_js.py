@@ -23,6 +23,8 @@ from pathlib import Path
 STATIC = Path(__file__).parent.parent / "amplifier_app_cost_viewer" / "static"
 APP_JS = STATIC / "app.js"
 VENDOR_LIT = STATIC / "vendor" / "lit.all.min.js"
+INDEX_HTML = STATIC / "index.html"
+CSS_FILE = STATIC / "style.css"
 
 
 # ---------------------------------------------------------------------------
@@ -2129,4 +2131,68 @@ class TestV3AcvBody:
         )
         assert "scrollTop" in content, (
             "AcvBody must track vertical scroll via scrollTop"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: v3 HTML structure (index.html)
+# ---------------------------------------------------------------------------
+
+
+class TestV3HtmlStructure:
+    """Verify index.html uses acv-overview + acv-body, not the old tree/timeline layout."""
+
+    def setup_method(self) -> None:
+        self.content = INDEX_HTML.read_text()
+
+    def test_has_acv_overview(self) -> None:
+        assert "<acv-overview" in self.content, (
+            "index.html must contain <acv-overview> element"
+        )
+
+    def test_has_acv_body(self) -> None:
+        assert "<acv-body" in self.content, (
+            "index.html must contain <acv-body> element"
+        )
+
+    def test_no_acv_tree(self) -> None:
+        assert "<acv-tree" not in self.content, (
+            "index.html must NOT contain <acv-tree> (moved to shadow DOM)"
+        )
+
+    def test_no_acv_timeline(self) -> None:
+        assert "<acv-timeline" not in self.content, (
+            "index.html must NOT contain <acv-timeline> (moved to shadow DOM)"
+        )
+
+    def test_no_main_tag(self) -> None:
+        assert "<main" not in self.content, (
+            "index.html must NOT contain <main> wrapper element"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: v3 CSS layout (style.css)
+# ---------------------------------------------------------------------------
+
+
+class TestV3CssLayout:
+    """Verify style.css has acv-overview and acv-body rules with correct sizing."""
+
+    def setup_method(self) -> None:
+        self.content = CSS_FILE.read_text()
+
+    def test_has_acv_overview(self) -> None:
+        assert "acv-overview" in self.content, (
+            "style.css must contain acv-overview layout rule"
+        )
+
+    def test_has_acv_body(self) -> None:
+        assert "acv-body" in self.content, (
+            "style.css must contain acv-body layout rule"
+        )
+
+    def test_has_60px(self) -> None:
+        assert "60px" in self.content, (
+            "style.css must contain 60px height rule for acv-overview"
         )

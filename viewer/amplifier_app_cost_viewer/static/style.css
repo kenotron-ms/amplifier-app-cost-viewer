@@ -188,84 +188,23 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
-   Three-pane layout
+   New component layout (v3)
    --------------------------------------------------------------------------- */
 
-#main {
-  display: flex;
-  flex-direction: row;
+acv-toolbar {
+  flex-shrink: 0;
+}
+
+acv-overview {
+  flex-shrink: 0;
+  height: 60px;
+  display: block;
+}
+
+acv-body {
   flex: 1;
-  overflow: hidden;
   min-height: 0;
-}
-
-/* Left panel — session tree */
-#tree-panel {
-  width: var(--tree-width);
-  min-width: var(--tree-width);
-  max-width: var(--tree-width);
-  background-color: var(--surface);
-  border-right: 1px solid var(--border);
-  overflow-y: auto;
-  overflow-x: hidden;
-  flex-shrink: 0;
-}
-
-/* Right panel — Gantt */
-#gantt-panel {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-width: 0;
-  position: relative;
-}
-
-/* ---------------------------------------------------------------------------
-   Tree rows
-   --------------------------------------------------------------------------- */
-
-.tree-row {
-  display: flex;
-  align-items: center;
-  height: var(--row-height);
-  padding: 0 8px;
-  cursor: pointer;
-  user-select: none;
-  border-left: 2px solid transparent;
-  transition: background-color 0.1s ease;
-}
-
-.tree-row:hover {
-  background-color: var(--surface-alt);
-}
-
-.tree-row.active {
-  border-left-color: var(--accent);
-  background-color: var(--surface-alt);
-}
-
-.toggle {
-  flex-shrink: 0;
-  width: 14px;
-  color: var(--text-muted);
-  font-size: 10px;
-  text-align: center;
-}
-
-.session-label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
-}
-
-.session-cost {
-  flex-shrink: 0;
-  color: var(--text-muted);
-  font-size: 11px;
-  margin-left: 4px;
+  display: block;
 }
 
 /* Panel placeholder (loading state) */
@@ -273,59 +212,6 @@ body {
   padding: 12px 8px;
   color: var(--text-muted);
   font-style: italic;
-}
-
-/* ---------------------------------------------------------------------------
-   Gantt panel — time ruler (sticky)
-   --------------------------------------------------------------------------- */
-
-#time-ruler {
-  height: var(--ruler-height);
-  min-height: var(--ruler-height);
-  background-color: var(--surface);
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  flex-shrink: 0;
-  overflow: hidden;
-}
-
-/* Gantt rows container */
-#gantt-rows {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: auto;
-  position: relative;
-}
-
-/* ---------------------------------------------------------------------------
-   Span bars
-   --------------------------------------------------------------------------- */
-
-.span-bar {
-  position: absolute;
-  height: calc(var(--row-height) - 8px);
-  top: 4px;
-  border-radius: 2px;
-  cursor: pointer;
-  opacity: 0.85;
-  transition: opacity 0.1s ease;
-}
-
-.span-bar:hover {
-  opacity: 1;
-}
-
-/* Gantt row wrapper */
-.gantt-row {
-  height: var(--row-height);
-  position: relative;
-  border-bottom: 1px solid var(--border);
-}
-
-.gantt-row:hover {
-  background-color: rgba(255, 255, 255, 0.02);
 }
 
 /* ---------------------------------------------------------------------------
