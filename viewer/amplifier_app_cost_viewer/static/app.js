@@ -757,6 +757,31 @@ class AcvOverview extends HTMLElement {
       ctx.fillStyle = color;
       ctx.fill();
     }
+
+    // Selection box overlay
+    this.#drawSelectionBox(ctx, W, H);
+  }
+
+  #drawSelectionBox(ctx, W, H) {
+    if (!state.totalDurationMs) return;
+    const x1   = ovTimeToPixel(state.viewportStartMs, W);
+    const x2   = ovTimeToPixel(state.viewportEndMs, W);
+    const boxW = Math.max(4, x2 - x1);
+
+    // Darken area outside selection
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(0, 0, x1, H);
+    ctx.fillRect(x1 + boxW, 0, W - (x1 + boxW), H);
+
+    // Selection box border
+    ctx.strokeStyle = 'rgba(88, 166, 255, 0.9)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x1 + 0.5, 0.5, boxW - 1, H - 1);
+
+    // Resize handles — 4px-wide blue strips at left and right edges
+    ctx.fillStyle = 'rgba(88, 166, 255, 0.9)';
+    ctx.fillRect(x1, 0, 4, H);
+    ctx.fillRect(x1 + boxW - 4, 0, 4, H);
   }
 }
 

@@ -2003,3 +2003,50 @@ class TestP2OverviewCanvas:
         assert "batches" in self.content, (
             "AcvOverview #draw() must use a 'batches' Map for color-batched span rendering"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Phase 2 — AcvOverview selection box overlay
+# ---------------------------------------------------------------------------
+
+
+class TestP2SelectionBox:
+    """Verify AcvOverview draws a selection box with darkened exterior and resize handles."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_draw_selection_box_method_exists(self) -> None:
+        """AcvOverview must define a #drawSelectionBox method."""
+        assert "drawSelectionBox" in self.content, (
+            "AcvOverview must define a '#drawSelectionBox' method for the viewport overlay"
+        )
+
+    def test_selection_box_reads_viewport_state(self) -> None:
+        """#drawSelectionBox must read viewportStartMs and viewportEndMs from state."""
+        assert "viewportStartMs" in self.content, (
+            "#drawSelectionBox must read state.viewportStartMs"
+        )
+        assert "viewportEndMs" in self.content, (
+            "#drawSelectionBox must read state.viewportEndMs"
+        )
+
+    def test_selection_box_darkens_outside(self) -> None:
+        """#drawSelectionBox must darken areas outside the viewport with semi-transparent black."""
+        assert "rgba(0, 0, 0" in self.content, (
+            "#drawSelectionBox must use 'rgba(0, 0, 0' (semi-transparent black) "
+            "to darken areas outside the selection box"
+        )
+
+    def test_selection_box_has_blue_border(self) -> None:
+        """#drawSelectionBox must draw a blue border using rgba(88, 166, 255, 0.9)."""
+        assert "rgba(88, 166, 255" in self.content, (
+            "#drawSelectionBox must use 'rgba(88, 166, 255' for the blue selection border "
+            "and resize handles"
+        )
+
+    def test_selection_box_has_resize_handles(self) -> None:
+        """#drawSelectionBox must draw a stroked rectangle border via strokeRect."""
+        assert "strokeRect" in self.content, (
+            "#drawSelectionBox must call 'strokeRect' to draw the stroked selection border"
+        )
