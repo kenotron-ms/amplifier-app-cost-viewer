@@ -836,19 +836,27 @@ class AcvBody extends HTMLElement {
     if (gridEl) {
       const bodyW = gridEl.clientWidth - 220;
       const bodyH = Math.max(rows * ROW_H, 32);
-      if (mc.width !== Math.floor(bodyW * dpr)) {
+      const needsMcResize =
+        mc.width  !== Math.floor(bodyW * dpr) ||
+        mc.height !== Math.floor(bodyH * dpr);
+      if (needsMcResize) {
         mc.width  = Math.floor(bodyW * dpr);
         mc.height = Math.floor(bodyH * dpr);
         mc.style.width  = bodyW + 'px';
         mc.style.height = bodyH + 'px';
+        this.#ctx.setTransform(1, 0, 0, 1, 0, 0);
         this.#ctx.scale(dpr, dpr);
       }
       const rulerH = 28;
-      if (rc.width !== Math.floor(bodyW * dpr)) {
+      const needsRcResize =
+        rc.width  !== Math.floor(bodyW * dpr) ||
+        rc.height !== Math.floor(rulerH * dpr);
+      if (needsRcResize) {
         rc.width  = Math.floor(bodyW * dpr);
         rc.height = Math.floor(rulerH * dpr);
         rc.style.width  = bodyW + 'px';
         rc.style.height = rulerH + 'px';
+        this.#rulerCtx.setTransform(1, 0, 0, 1, 0, 0);
         this.#rulerCtx.scale(dpr, dpr);
       }
     }

@@ -1535,9 +1535,9 @@ class TestV3AcvBody:
 
     def test_ruler_position_sticky(self) -> None:
         """Ruler wrapper must use position: sticky so it sticks to the top."""
-        assert "position: sticky" in self.content or "position:sticky" in self.content, (
-            "AcvBody ruler wrapper must use 'position: sticky' to stay at top"
-        )
+        assert (
+            "position: sticky" in self.content or "position:sticky" in self.content
+        ), "AcvBody ruler wrapper must use 'position: sticky' to stay at top"
 
     def test_labels_column_present(self) -> None:
         """AcvBody must render a labels column (grid-column 1)."""
@@ -1564,10 +1564,10 @@ class TestV3AcvBody:
         # AcvBody must also reference them. The test checks they appear in the
         # context of the AcvBody implementation.
         content = self.content
-        assert ("\u25be" in content or "▾" in content), (
+        assert "\u25be" in content or "▾" in content, (
             "AcvBody must render ▾ (U+25BE) for expanded nodes"
         )
-        assert ("\u25b8" in content or "▸" in content), (
+        assert "\u25b8" in content or "▸" in content, (
             "AcvBody must render ▸ (U+25B8) for collapsed nodes"
         )
 
@@ -1622,9 +1622,7 @@ class TestV3HtmlStructure:
         )
 
     def test_has_acv_body(self) -> None:
-        assert "<acv-body" in self.content, (
-            "index.html must contain <acv-body> element"
-        )
+        assert "<acv-body" in self.content, "index.html must contain <acv-body> element"
 
     def test_no_acv_tree(self) -> None:
         assert "<acv-tree" not in self.content, (
@@ -1727,9 +1725,7 @@ class TestV3CssLayout:
         )
 
     def test_has_acv_body(self) -> None:
-        assert "acv-body" in self.content, (
-            "style.css must contain acv-body layout rule"
-        )
+        assert "acv-body" in self.content, "style.css must contain acv-body layout rule"
 
     def test_has_60px(self) -> None:
         assert "60px" in self.content, (
@@ -1770,9 +1766,7 @@ class TestAcvBodyCanvas:
         assert "setViewport" in app_js_code, (
             "AcvBody canvas drag handler must call setViewport() to pan the viewport"
         )
-        assert (
-            "dragStartViewportStart" in app_js_code or "dragStart" in app_js_code
-        ), (
+        assert "dragStartViewportStart" in app_js_code or "dragStart" in app_js_code, (
             "AcvBody mousedown handler must store drag start position "
             "(dragStartViewportStart or similar)"
         )
@@ -1788,3 +1782,39 @@ class TestAcvBodyCanvas:
             "AcvBody canvas wheel listener must use { passive: false } "
             "to allow preventDefault()"
         )
+
+
+# ---------------------------------------------------------------------------
+# Fixture for CSS tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def css_code() -> str:
+    return CSS_FILE.read_text()
+
+
+# ---------------------------------------------------------------------------
+# Tests: Bug fixes — display:flex + canvas height resize gate
+# ---------------------------------------------------------------------------
+
+
+def test_acv_body_display_flex(css_code: str) -> None:
+    """acv-body must use display: flex to allow inner grid to be constrained."""
+    import re
+
+    match = re.search(r"acv-body\s*\{([^}]+)\}", css_code)
+    assert match, "acv-body rule not found"
+    rule = match.group(1)
+    assert "display: flex" in rule or "display:flex" in rule, (
+        "acv-body must use 'display: flex' (not display:block) so shadow DOM "
+        ":host { display: flex } is not overridden and the inner grid is constrained"
+    )
+
+
+def test_canvas_resize_checks_both_dimensions(app_js_code: str) -> None:
+    """Canvas resize must check height as well as width."""
+    assert "needsMcResize" in app_js_code or "mc.height !== " in app_js_code, (
+        "#ensureCanvases() must check BOTH mc.width AND mc.height when deciding "
+        "whether to resize (use needsMcResize variable or 'mc.height !== ' check)"
+    )
