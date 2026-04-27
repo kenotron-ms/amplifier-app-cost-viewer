@@ -26,6 +26,7 @@ const SPAN_H      = 20;    // px span bar height
 const HEATMAP_H   = 20;    // px heatmap row height
 const IO_TRUNCATE = 500;   // chars before "show more"
 const MIN_SPAN_MS = 100;   // minimum viewport span in milliseconds
+const VIRTUAL_BUFFER = 5;  // extra rows to render above/below visible area
 
 // =============================================================================
 // Section 1: State
@@ -888,6 +889,10 @@ class AcvBody extends HTMLElement {
   #hasDragged = false;
   #rowH   = ROW_H;    // actual rendered table row height (measured, may differ from ROW_H)
   #theadH = RULER_H;  // actual rendered thead height (measured, may differ from RULER_H)
+  #firstVisible = 0;   // first row index in virtual window
+  #lastVisible = 50;   // last row index in virtual window (initial guess)
+  #totalRows = 0;      // total number of visible rows (updated each render)
+  #renderRafId = null;  // requestAnimationFrame handle for throttled re-renders
 
   constructor() {
     super();
@@ -1145,6 +1150,35 @@ class AcvBody extends HTMLElement {
     // Wire events once
     if (!mc._v3wired) { this.#wireCanvasEvents(mc); mc._v3wired = true; }
     if (!rc._v3wired) { this.#wireRulerEvents(rc);  rc._v3wired = true; }
+  }
+
+  #computeVirtualWindow() {
+    const wrap = this._root.getElementById('table-wrap');
+    if (!wrap || this.#totalRows === 0) {
+      const changed = this.#firstVisible !== 0 || this.#lastVisible !== 0;
+      this.#firstVisible = 0;
+      this.#lastVisible = 0;
+      return changed;
+    }
+    const scrollTop = wrap.scrollTop;
+    const viewportH = wrap.clientHeight;
+    const rowH = this.#rowH || ROW_H;
+    const first = Math.max(0, Math.floor(scrollTop / rowH) - VIRTUAL_BUFFER);
+    const last = Math.min(this.#totalRows - 1, Math.ceil((scrollTop + viewportH) / rowH) + VIRTUAL_BUFFER);
+    const changed = first !== this.#firstVisible || last !== this.#lastVisible;
+    this.#firstVisible = first;
+    this.#lastVisible = last;
+    return changed;
+  }
+
+  #scheduleRender() {
+    if (this.#renderRafId) return;
+    this.#renderRafId = requestAnimationFrame(() => {
+      this.#renderRafId = null;
+      this._render();
+      this.#ensureCanvases();
+      this.#scheduleRedraw();
+    });
   }
 
   #scheduleRedraw() {
