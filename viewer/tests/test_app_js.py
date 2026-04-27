@@ -1917,3 +1917,11 @@ def test_canvas_top_uses_measured_thead(app_js_code: str) -> None:
 def test_draw_uses_measured_row_height(app_js_code: str) -> None:
     """#draw() must use measured row height, not the ROW_H constant for y positions."""
     assert "this.#rowH" in app_js_code or "this._rowH" in app_js_code
+
+
+def test_draw_renders_row_borders(app_js_code: str) -> None:
+    """Canvas must draw horizontal row separator lines matching table borders."""
+    assert "#21262d" in app_js_code  # border color
+    # Must draw lines (moveTo + lineTo for row separators)
+    assert "moveTo(0" in app_js_code
+    assert "lineTo(W" in app_js_code

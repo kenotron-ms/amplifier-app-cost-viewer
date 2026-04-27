@@ -961,6 +961,19 @@ class AcvBody extends HTMLElement {
       ctx.fillRect(0, y, W, this.#rowH);
     }
 
+    // Row separator lines — match table's border-bottom: 1px solid #21262d
+    ctx.strokeStyle = '#21262d';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const [, rowIdx] of rowMap) {
+      const y = Math.floor((rowIdx + 1) * this.#rowH) - 0.5;
+      if (y >= 0 && y <= H) {
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+      }
+    }
+    ctx.stroke();
+
     if (!state.spans || state.spans.length === 0) return;
 
     // Vertical grid lines (same tick intervals as ruler)
