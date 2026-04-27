@@ -2373,3 +2373,53 @@ def test_view_toggle_exists(app_js_code: str) -> None:
         "AcvDetail Input/Output tabs must have a toggle for plain text vs JSON tree view "
         "(must contain 'view-toggle', 'viewToggle', 'jsonMode', or 'json_mode')"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Three focused improvements
+# ---------------------------------------------------------------------------
+
+
+def test_overview_clamp_pan_to_bounds(app_js_code: str) -> None:
+    """Overview pan drag must clamp to [0, totalDurationMs]."""
+    assert "totalDurationMs - dur" in app_js_code, (
+        "Pan drag must clamp to totalDurationMs - dur so the viewport "
+        "glides smoothly against the right edge"
+    )
+    assert "clampedStart" in app_js_code, (
+        "Pan drag must use a 'clampedStart' variable to clamp the start "
+        "before passing it to setViewport"
+    )
+
+
+def test_overview_clamp_resize_to_bounds(app_js_code: str) -> None:
+    """Overview resize drag must clamp start to 0 and end to totalDurationMs."""
+    assert "clampedEnd" in app_js_code, (
+        "Resize-right drag must use a 'clampedEnd' variable to clamp the end "
+        "to state.totalDurationMs before passing it to setViewport"
+    )
+
+
+def test_json_tree_is_default_view(app_js_code: str) -> None:
+    """JSON tree must be the default view (no entry in map = true/json)."""
+    assert "?? true" in app_js_code, (
+        "AcvDetail #ioTabContent must use '?? true' so that a missing map entry "
+        "defaults to JSON tree view (not plain text)"
+    )
+
+
+def test_overview_bar_chart_renders_cost(app_js_code: str) -> None:
+    """Overview must render a cost bar chart using bucketed span costs."""
+    assert "msPerBucket" in app_js_code, (
+        "AcvOverview #draw() must bucket spans by time using a 'msPerBucket' variable"
+    )
+    assert "Float64Array" in app_js_code, (
+        "AcvOverview #draw() must use Float64Array for cost bucket accumulation"
+    )
+
+
+def test_overview_peak_marker_amber(app_js_code: str) -> None:
+    """Overview bar chart must have amber peak cost marker."""
+    assert "f59e0b" in app_js_code, (
+        "AcvOverview #draw() must draw an amber peak marker using color '#f59e0b'"
+    )

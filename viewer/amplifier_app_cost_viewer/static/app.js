@@ -791,41 +791,59 @@ class AcvOverview extends HTMLElement {
     if (!ctx || !canvas) return;
     const W = parseFloat(canvas.style.width)  || canvas.width  / (window.devicePixelRatio || 1);
     const H = parseFloat(canvas.style.height) || canvas.height / (window.devicePixelRatio || 1);
-    ctx.clearRect(0, 0, W, H);
 
-    // Background
+    ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = '#0d1117';
     ctx.fillRect(0, 0, W, H);
 
-    if (!state.spans || state.spans.length === 0 || !state.totalDurationMs) return;
+    const spans = state.spans || [];
+    const total = state.totalDurationMs || 0;
 
-    const rowMap    = state.sessionData
-      ? _rowIndexMap(state.sessionData, state.expandedSessions)
-      : new Map();
-    const totalRows = rowMap.size || 1;
-    const rowH      = Math.min(8, H / totalRows);
-
-    // Color-batched compressed span rectangles
-    const batches = new Map();
-    for (const span of state.spans) {
-      const rowIdx = rowMap.get(span.session_id);
-      if (rowIdx === undefined) continue;
-      const y = rowIdx * rowH;
-      const x = ovTimeToPixel(span.start_ms || 0, W);
-      const w = Math.max(1, ovTimeToPixel(span.end_ms || 0, W) - x);
-      const color = span.color || '#64748B';
-      if (!batches.has(color)) batches.set(color, []);
-      batches.get(color).push({ x, y, w, h: rowH });
+    if (spans.length === 0 || total === 0) {
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('No data', W / 2, H / 2 + 4);
+      ctx.textAlign = 'left';
+      this.#drawSelectionBox(ctx, W, H);
+      return;
     }
 
-    for (const [color, rects] of batches) {
+    // Bucket spans by time — one bucket per ~4px
+    const N = Math.max(1, Math.floor(W / 4));
+    const buckets = new Float64Array(N);
+    const msPerBucket = total / N;
+    for (const span of spans) {
+      const b = Math.min(N - 1, Math.floor((span.start_ms || 0) / msPerBucket));
+      if (b >= 0) buckets[b] += span.cost_usd || 0;
+    }
+
+    const maxCost = Math.max(...buckets, 1e-9);
+    const availH  = H - 2;
+    const barW    = W / N;
+
+    // Draw bars — Anthropic purple, opacity 0.9
+    ctx.fillStyle = 'rgba(123, 47, 190, 0.9)';
+    for (let i = 0; i < N; i++) {
+      if (buckets[i] <= 0) continue;
+      const barH = Math.max(1, (buckets[i] / maxCost) * availH);
+      ctx.fillRect(i * barW, H - barH, barW - 0.5, barH);
+    }
+
+    // Amber peak marker
+    let peakIdx = 0;
+    for (let i = 1; i < N; i++) if (buckets[i] > buckets[peakIdx]) peakIdx = i;
+    if (buckets[peakIdx] > 0) {
+      const peakX = (peakIdx + 0.5) * barW;
+      const peakH = (buckets[peakIdx] / maxCost) * availH;
+      const peakY = H - peakH - 1;
       ctx.beginPath();
-      for (const r of rects) ctx.rect(r.x, r.y, r.w, r.h);
-      ctx.fillStyle = color;
+      ctx.arc(peakX, peakY, 3, 0, Math.PI * 2);
+      ctx.fillStyle = '#f59e0b';
       ctx.fill();
     }
 
-    // Selection box overlay
+    // Selection box on top
     this.#drawSelectionBox(ctx, W, H);
   }
 
@@ -891,11 +909,15 @@ class AcvOverview extends HTMLElement {
         const dms = (dx / W) * state.totalDurationMs;
 
         if (this.#dragMode === 'pan') {
-          setViewport(this.#dragStartMs.start + dms, this.#dragStartMs.end + dms, false);
+          const dur = this.#dragStartMs.end - this.#dragStartMs.start;
+          const clampedStart = Math.max(0, Math.min(state.totalDurationMs - dur, this.#dragStartMs.start + dms));
+          setViewport(clampedStart, clampedStart + dur, false);
         } else if (this.#dragMode === 'resize-left') {
-          setViewport(this.#dragStartMs.start + dms, this.#dragStartMs.end, false);
+          const clampedStart = Math.max(0, Math.min(this.#dragStartMs.end - MIN_SPAN_MS, this.#dragStartMs.start + dms));
+          setViewport(clampedStart, this.#dragStartMs.end, false);
         } else if (this.#dragMode === 'resize-right') {
-          setViewport(this.#dragStartMs.start, this.#dragStartMs.end + dms, false);
+          const clampedEnd = Math.min(state.totalDurationMs, Math.max(this.#dragStartMs.start + MIN_SPAN_MS, this.#dragStartMs.end + dms));
+          setViewport(this.#dragStartMs.start, clampedEnd, false);
         }
         return;
       }
@@ -1708,7 +1730,7 @@ class AcvDetail extends HTMLElement {
   #ioTabContent(span, tabName, value) {
     if (value == null) return html`<div class="empty">—</div>`;
     const key    = (span.session_id || '') + '_' + tabName;
-    const isJson = this.#jsonMode.get(key) || false;
+    const isJson = this.#jsonMode.get(key) ?? true;
     const toggle = () => { this.#jsonMode.set(key, !isJson); this.update(); };
     const label  = tabName === 'input' ? 'INPUT' : 'OUTPUT';
     return html`
