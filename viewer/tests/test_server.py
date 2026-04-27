@@ -525,6 +525,25 @@ def test_session_list_includes_token_counts_from_observability(
     assert entry["total_output_tokens"] == 250
 
 
+def test_session_detail_token_counts_nonzero(client: TestClient) -> None:
+    """GET /api/sessions/{id} returns total_input_tokens and total_output_tokens > 0.
+
+    _parse_all_spans_for_node must populate token fields from span data.
+    Fixture has 512 input / 128 output tokens per session (from conftest.py).
+    """
+    response = client.get(f"/api/sessions/{ROOT_SESSION_ID}")
+    assert response.status_code == 200
+    body = response.json()
+    assert "total_input_tokens" in body, "total_input_tokens must be present in session detail"
+    assert "total_output_tokens" in body, "total_output_tokens must be present in session detail"
+    assert body["total_input_tokens"] > 0, (
+        f"total_input_tokens must be > 0 after span loading, got {body['total_input_tokens']}"
+    )
+    assert body["total_output_tokens"] > 0, (
+        f"total_output_tokens must be > 0 after span loading, got {body['total_output_tokens']}"
+    )
+
+
 def test_prewarm_handler_in_server():
     """server.py has a startup prewarm handler."""
     server_path = Path("amplifier_app_cost_viewer/server.py")

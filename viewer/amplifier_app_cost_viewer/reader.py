@@ -502,6 +502,10 @@ def aggregate_costs(node: SessionNode) -> None:
     node.total_cost_usd = node.cost_usd + sum(
         child.total_cost_usd for child in node.children
     )
+    node.total_input_tokens += sum(child.total_input_tokens for child in node.children)
+    node.total_output_tokens += sum(
+        child.total_output_tokens for child in node.children
+    )
 
 
 def _parse_all_spans(node: SessionNode, root_start_ms: int) -> None:

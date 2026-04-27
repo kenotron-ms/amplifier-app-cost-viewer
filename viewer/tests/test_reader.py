@@ -831,6 +831,37 @@ def test_read_metadata_partial_extracts_fields(tmp_path):
     assert result["created"] == "2026-01-01T00:00:00Z"
 
 
+def test_aggregate_costs_rolls_up_tokens():
+    """aggregate_costs must propagate input/output tokens from children to parent."""
+    from amplifier_app_cost_viewer.reader import SessionNode, aggregate_costs
+
+    def _node(sid, parent_id=None):
+        return SessionNode(
+            session_id=sid,
+            project_slug="x",
+            parent_id=parent_id,
+            start_ts="",
+            end_ts=None,
+            duration_ms=0,
+            cost_usd=0.0,
+            total_cost_usd=0.0,
+            spans=[],
+            children=[],
+        )
+
+    parent = _node("p")
+    child1 = _node("c1", parent_id="p")
+    child2 = _node("c2", parent_id="p")
+    child1.total_input_tokens = 1000
+    child1.total_output_tokens = 200
+    child2.total_input_tokens = 500
+    child2.total_output_tokens = 100
+    parent.children = [child1, child2]
+    aggregate_costs(parent)
+    assert parent.total_input_tokens == 1500
+    assert parent.total_output_tokens == 300
+
+
 def test_name_in_session_node(tmp_path):
     """SessionNode.name is populated from metadata.json."""
     amp_home = tmp_path / ".amplifier"

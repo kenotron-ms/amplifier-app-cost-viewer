@@ -176,6 +176,8 @@ def _parse_all_spans_for_node(node: SessionNode, root_start_ms: int) -> None:
                 node.events_path, root_start_ms, session_start_ms
             )
             node.cost_usd = sum(s.cost_usd for s in node.spans)
+            node.total_input_tokens = sum(s.input_tokens for s in node.spans)
+            node.total_output_tokens = sum(s.output_tokens for s in node.spans)
         except (ValueError, OSError):
             pass
     for child in node.children:
