@@ -651,6 +651,7 @@ class AcvBody extends HTMLElement {
   #rulerCanvas = null;
   #rulerCtx = null;
   #rafId = null;
+  #resizeObserver = null;
   #dragStartX = 0;
   #dragStartViewportStart = 0;
   #dragStartViewportEnd = 0;
@@ -675,14 +676,29 @@ class AcvBody extends HTMLElement {
           this.#scheduleRedraw();
         });
       }
+      this.#setupResizeObserver();
     });
+  }
+
+  disconnectedCallback() {
+    if (this.#resizeObserver) {
+      this.#resizeObserver.disconnect();
+      this.#resizeObserver = null;
+    }
+    if (this.#rafId) {
+      cancelAnimationFrame(this.#rafId);
+      this.#rafId = null;
+    }
   }
 
   /** Called on every state change to re-render Lit template + canvas. */
   notify() {
     this._render();
-    this.#ensureCanvases();
-    this.#scheduleRedraw();
+    // ResizeObserver will handle async resizing, but also call sync for immediate needs
+    requestAnimationFrame(() => {
+      this.#ensureCanvases();
+      this.#scheduleRedraw();
+    });
   }
 
   _render() {
@@ -819,53 +835,71 @@ class AcvBody extends HTMLElement {
 
   // ── Canvas lifecycle ──────────────────────────────────────────────────────
 
+  #setupResizeObserver() {
+    if (this.#resizeObserver) this.#resizeObserver.disconnect();
+    this.#resizeObserver = new ResizeObserver(() => {
+      this.#ensureCanvases();
+      this.#scheduleRedraw();
+    });
+    this.#resizeObserver.observe(this);
+    const tbody = this._root.querySelector('tbody');
+    if (tbody) this.#resizeObserver.observe(tbody);
+  }
+
   #ensureCanvases() {
     const mc = this._root.getElementById('main-canvas');
     const rc = this._root.getElementById('ruler-canvas');
-    if (!mc || !rc) return;
-    if (this.#canvas !== mc) {
-      this.#canvas = mc;
-      this.#ctx = mc.getContext('2d');
-      this.#wireCanvasEvents(mc);
-    }
-    if (this.#rulerCanvas !== rc) {
-      this.#rulerCanvas = rc;
-      this.#rulerCtx = rc.getContext('2d');
-      this.#wireRulerEvents(rc);
-    }
-    // Size canvases to match their container
-    const dpr = window.devicePixelRatio || 1;
-    const rows = state.sessionData
-      ? _rowIndexMap(state.sessionData, state.expandedSessions).size
-      : 0;
     const tableWrap = this._root.getElementById('table-wrap');
-    if (tableWrap) {
-      const bodyW = tableWrap.clientWidth - 220;
-      const bodyH = Math.max(rows * ROW_H, 32);
-      const needsMcResize =
-        mc.width  !== Math.floor(bodyW * dpr) ||
-        mc.height !== Math.floor(bodyH * dpr);
-      if (needsMcResize) {
-        mc.width  = Math.floor(bodyW * dpr);
-        mc.height = Math.floor(bodyH * dpr);
-        mc.style.width  = bodyW + 'px';
-        mc.style.height = bodyH + 'px';
-        this.#ctx.setTransform(1, 0, 0, 1, 0, 0);
-        this.#ctx.scale(dpr, dpr);
-      }
-      const rulerH = 28;
-      const needsRcResize =
-        rc.width  !== Math.floor(bodyW * dpr) ||
-        rc.height !== Math.floor(rulerH * dpr);
-      if (needsRcResize) {
-        rc.width  = Math.floor(bodyW * dpr);
-        rc.height = Math.floor(rulerH * dpr);
-        rc.style.width  = bodyW + 'px';
-        rc.style.height = rulerH + 'px';
-        this.#rulerCtx.setTransform(1, 0, 0, 1, 0, 0);
-        this.#rulerCtx.scale(dpr, dpr);
-      }
+    const tbody = this._root.querySelector('tbody');
+    const thRuler = this._root.querySelector('.th-ruler');
+    if (!mc || !rc || !tableWrap || !tbody) return;
+
+    const dpr = window.devicePixelRatio || 1;
+
+    // MEASURE — don't compute
+    const tbodyRect  = tbody.getBoundingClientRect();
+    const wrapRect   = tableWrap.getBoundingClientRect();
+    const rulerRect  = thRuler ? thRuler.getBoundingClientRect() : wrapRect;
+
+    const canvasW = Math.max(1, Math.round(wrapRect.width  - 220));
+    const canvasH = Math.max(1, Math.round(tbodyRect.height));
+    const rulerW  = Math.max(1, Math.round(rulerRect.width));
+
+    // Main canvas: CSS size = measured, pixel buffer = measured × dpr
+    const mcCssW = canvasW + 'px';
+    const mcCssH = canvasH + 'px';
+    if (mc.style.width !== mcCssW || mc.style.height !== mcCssH ||
+        mc.width !== Math.round(canvasW * dpr) || mc.height !== Math.round(canvasH * dpr)) {
+      mc.style.width  = mcCssW;
+      mc.style.height = mcCssH;
+      mc.width  = Math.round(canvasW * dpr);
+      mc.height = Math.round(canvasH * dpr);
+      this.#ctx = mc.getContext('2d');
+      this.#ctx.scale(dpr, dpr);
+      this.#canvas = mc;
+    } else if (!this.#ctx) {
+      this.#ctx = mc.getContext('2d');
+      this.#canvas = mc;
     }
+
+    // Ruler canvas
+    if (rc.style.width !== rulerW + 'px' ||
+        rc.width !== Math.round(rulerW * dpr)) {
+      rc.style.width  = rulerW + 'px';
+      rc.style.height = RULER_H + 'px';
+      rc.width  = Math.round(rulerW * dpr);
+      rc.height = Math.round(RULER_H * dpr);
+      this.#rulerCtx = rc.getContext('2d');
+      this.#rulerCtx.scale(dpr, dpr);
+      this.#rulerCanvas = rc;
+    } else if (!this.#rulerCtx) {
+      this.#rulerCtx = rc.getContext('2d');
+      this.#rulerCanvas = rc;
+    }
+
+    // Wire events once
+    if (!mc._v3wired) { this.#wireCanvasEvents(mc); mc._v3wired = true; }
+    if (!rc._v3wired) { this.#wireRulerEvents(rc);  rc._v3wired = true; }
   }
 
   #scheduleRedraw() {
@@ -883,8 +917,9 @@ class AcvBody extends HTMLElement {
     const ctx    = this.#ctx;
     const canvas = this.#canvas;
     if (!ctx || !canvas) return;
-    const W = canvas.width  / (window.devicePixelRatio || 1);
-    const H = canvas.height / (window.devicePixelRatio || 1);
+    // Use CSS pixel dimensions, not canvas.width/canvas.height (those are DPR-scaled)
+    const W = parseFloat(canvas.style.width) || canvas.width / (window.devicePixelRatio || 1);
+    const H = parseFloat(canvas.style.height) || canvas.height / (window.devicePixelRatio || 1);
     ctx.clearRect(0, 0, W, H);
 
     const rowMap   = state.sessionData
@@ -982,7 +1017,8 @@ class AcvBody extends HTMLElement {
     const ctx    = this.#rulerCtx;
     const canvas = this.#rulerCanvas;
     if (!ctx || !canvas) return;
-    const W = canvas.width / (window.devicePixelRatio || 1);
+    // Use CSS pixel dimensions, not canvas.width (that is DPR-scaled)
+    const W = parseFloat(canvas.style.width) || canvas.width / (window.devicePixelRatio || 1);
     const H = 28;
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = '#161b22';

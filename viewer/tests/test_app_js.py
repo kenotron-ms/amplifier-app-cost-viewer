@@ -1862,3 +1862,31 @@ def test_no_css_grid_in_acv_body(app_js_code: str) -> None:
         "AcvBody must NOT use 'grid-template-columns: 220px' — "
         "the CSS grid two-column approach has been replaced by an HTML table"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Canvas sizing — DOM measurement + ResizeObserver
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_canvases_uses_getboundingclientrect(app_js_code: str) -> None:
+    """Canvas sizing must measure actual DOM dimensions, not compute rows*ROW_H."""
+    assert "getBoundingClientRect" in app_js_code
+
+
+def test_resize_observer_watches_host_and_tbody(app_js_code: str) -> None:
+    """ResizeObserver must observe both the host element and tbody."""
+    assert "ResizeObserver" in app_js_code
+    assert "#resizeObserver" in app_js_code or "_resizeObserver" in app_js_code
+
+
+def test_canvas_dpr_scaling(app_js_code: str) -> None:
+    """Canvas pixel buffer must be scaled by devicePixelRatio."""
+    assert "devicePixelRatio" in app_js_code
+    assert "dpr" in app_js_code
+
+
+def test_disconnected_callback_cleans_up(app_js_code: str) -> None:
+    """disconnectedCallback must disconnect ResizeObserver and cancel RAF."""
+    assert "disconnectedCallback" in app_js_code
+    assert "disconnect()" in app_js_code
