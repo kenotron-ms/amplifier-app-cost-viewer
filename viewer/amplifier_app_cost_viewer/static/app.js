@@ -909,6 +909,7 @@ class AcvBody extends HTMLElement {
       if (wrap) {
         wrap.addEventListener('scroll', () => {
           state.scrollTop = wrap.scrollTop;
+          if (this.#computeVirtualWindow()) { this.#scheduleRender(); }
           this.#scheduleRedraw();
         });
       }
