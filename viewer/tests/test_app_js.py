@@ -1570,15 +1570,15 @@ def test_spinner_css_in_toolbar(app_js_code: str) -> None:
 
 
 def test_canvas_shows_loading_text(app_js_code: str) -> None:
-    """timeline draw() must render Loading text when loading"""
+    """v3 loading model: state.loading drives toolbar spinner (canvas overlay removed)"""
+    # Toolbar spinner uses aria-label="Loading" — Loading text still present in codebase
     assert "Loading" in app_js_code, (
-        "AcvTimeline #draw() must render 'Loading' text when loading"
+        "Loading indicator must exist somewhere in the UI (e.g. toolbar spinner aria-label)"
     )
-    assert (
-        "this._loading" in app_js_code
-        or "this.#loading" in app_js_code
-        or "_loading" in app_js_code
-    ), "AcvTimeline must track loading state via this._loading or this.#loading"
+    # v3: loading is tracked via state.loading, not a per-component #loading field
+    assert "state.loading" in app_js_code, (
+        "Loading state must be tracked via state.loading in v3 architecture"
+    )
 
 
 # ---------------------------------------------------------------------------

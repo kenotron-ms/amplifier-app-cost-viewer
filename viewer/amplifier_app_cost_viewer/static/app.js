@@ -785,7 +785,6 @@ class AcvTimeline extends HTMLElement {
   #canvas  = null;
   #ctx     = null;
   #rafId   = null;
-  #loading = false;
   // Drag-to-pan state
   #dragStartX = 0;
   #dragStartScrollLeft = 0;
@@ -810,12 +809,6 @@ class AcvTimeline extends HTMLElement {
 
   /** Trigger a canvas-only redraw (e.g. after a scroll event from the tree). */
   notify() {
-    this.#scheduleRedraw();
-  }
-
-  /** Set loading state — shows overlay on canvas while true. */
-  set loading(v) {
-    this.#loading = !!v;
     this.#scheduleRedraw();
   }
 
@@ -976,19 +969,6 @@ class AcvTimeline extends HTMLElement {
     const ts      = state.timeScale;
     const scrollL = state.scrollLeft;
     const scrollTop = state.scrollTop || 0;
-
-    // Loading overlay — shown while session data is being fetched
-    if (this.#loading) {
-      ctx.clearRect(0, 0, cw, ch);
-      ctx.fillStyle = '#0d1117';
-      ctx.fillRect(0, 0, cw, ch);
-      ctx.fillStyle = '#8b949e';
-      ctx.font = '14px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('Loading\u2026', cw / 2, ch / 2);
-      ctx.textAlign = 'left'; // reset
-      return;
-    }
 
     // 1. Resize is already done by #resizeCanvas before #draw is called.
 
