@@ -404,12 +404,14 @@ class TestAcvToolbar:
             "AcvToolbar must dispatch session-change CustomEvent"
         )
 
-    def test_dispatches_zoom_in_event(self) -> None:
-        assert "zoom-in" in self.content, "AcvToolbar must dispatch zoom-in CustomEvent"
+    def test_no_zoom_in_button(self) -> None:
+        assert "_onZoomIn" not in self.content, (
+            "AcvToolbar must NOT have _onZoomIn method (zoom controls removed in v3)"
+        )
 
-    def test_dispatches_zoom_out_event(self) -> None:
-        assert "zoom-out" in self.content, (
-            "AcvToolbar must dispatch zoom-out CustomEvent"
+    def test_no_zoom_out_button(self) -> None:
+        assert "_onZoomOut" not in self.content, (
+            "AcvToolbar must NOT have _onZoomOut method (zoom controls removed in v3)"
         )
 
     def test_dispatches_refresh_event(self) -> None:
@@ -420,9 +422,6 @@ class TestAcvToolbar:
 
     def test_shows_total_cost(self) -> None:
         assert "totalCost" in self.content, "AcvToolbar must show totalCost"
-
-    def test_shows_ms_px_zoom_label(self) -> None:
-        assert "ms/px" in self.content, "AcvToolbar must show ms/px zoom label"
 
 
 # ---------------------------------------------------------------------------
@@ -469,12 +468,6 @@ class TestInitWiring:
         assert "session-change" in self.content, (
             "init must wire session-change event listener"
         )
-
-    def test_wires_zoom_in_event(self) -> None:
-        assert "zoom-in" in self.content, "init must wire zoom-in event listener"
-
-    def test_wires_zoom_out_event(self) -> None:
-        assert "zoom-out" in self.content, "init must wire zoom-out event listener"
 
     def test_wires_refresh_event(self) -> None:
         assert "refresh" in self.content, "init must wire refresh event listener"
@@ -2198,6 +2191,45 @@ class TestV3LoadSession:
         assert "setViewport(0," in self.content, (
             "loadSession must call setViewport(0, state.totalDurationMs, false)"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: v3 init() wiring — events wired on acv-body (not acv-tree/acv-timeline)
+# ---------------------------------------------------------------------------
+
+
+class TestV3InitWiring:
+    """Verify that init() wires body events on acv-body, not acv-tree/acv-timeline."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_toggle_expand_wired_on_body(self) -> None:
+        """init() must use querySelector('acv-body') and wire toggle-expand."""
+        content = self.content
+        assert (
+            "querySelector('acv-body')" in content
+            or 'querySelector("acv-body")' in content
+        ), "init() must query for 'acv-body' element to wire toggle-expand"
+        assert "toggle-expand" in content, "init() must wire toggle-expand event"
+
+    def test_session_select_wired_on_body(self) -> None:
+        """init() must use querySelector('acv-body') and wire session-select."""
+        content = self.content
+        assert (
+            "querySelector('acv-body')" in content
+            or 'querySelector("acv-body")' in content
+        ), "init() must query for 'acv-body' element to wire session-select"
+        assert "session-select" in content, "init() must wire session-select event"
+
+    def test_detail_close_wired_on_body(self) -> None:
+        """init() must use querySelector('acv-body') and wire detail-close."""
+        content = self.content
+        assert (
+            "querySelector('acv-body')" in content
+            or 'querySelector("acv-body")' in content
+        ), "init() must query for 'acv-body' element to wire detail-close"
+        assert "detail-close" in content, "init() must wire detail-close event"
 
 
 # ---------------------------------------------------------------------------

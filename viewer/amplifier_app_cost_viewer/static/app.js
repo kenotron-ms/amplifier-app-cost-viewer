@@ -487,9 +487,9 @@ function _animateZoom(targetScale, anchorMs, anchorPx) {
 
 // =============================================================================
 // Section 6: Custom element — AcvToolbar
-// Session selector dropdown, zoom controls, total cost display, refresh button.
-// Dispatches CustomEvents for all user actions (session-change, zoom-in,
-// zoom-out, refresh, load-more) so that init() can wire them to state updates.
+// Session selector dropdown, total cost display, refresh button.
+// Dispatches CustomEvents for all user actions (session-change,
+// refresh, load-more) so that init() can wire them to state updates.
 // =============================================================================
 
 class AcvToolbar extends HTMLElement {
@@ -539,7 +539,6 @@ class AcvToolbar extends HTMLElement {
         select:hover, button:hover { background: var(--border, #30363d); }
         .cost-total { color: var(--text-muted, #8b949e); }
         .cost-total strong { color: var(--accent, #58a6ff); }
-        .zoom-label { color: var(--text-muted, #8b949e); font-size: 10px; }
         .spacer { flex: 1; }
         .spinner {
           display: inline-block;
@@ -566,9 +565,6 @@ class AcvToolbar extends HTMLElement {
       </select>
       <span class="cost-total">Total: <strong>$${totalCost.toFixed(4)}</strong></span>
       <span class="spacer"></span>
-      <span class="zoom-label">${state.timeScale.toFixed(1)} ms/px</span>
-      <button @click=${() => this._onZoomIn()} title="Zoom in">+</button>
-      <button @click=${() => this._onZoomOut()} title="Zoom out">−</button>
       <button @click=${() => this._onRefresh()} title="Refresh">↺</button>
       ${state.loading ? html`<span class="spinner" aria-label="Loading"></span>` : ''}
     `, this._root);
@@ -585,14 +581,6 @@ class AcvToolbar extends HTMLElement {
         detail: { id: val },
       }));
     }
-  }
-
-  _onZoomIn() {
-    this.dispatchEvent(new CustomEvent('zoom-in', { bubbles: true, composed: true }));
-  }
-
-  _onZoomOut() {
-    this.dispatchEvent(new CustomEvent('zoom-out', { bubbles: true, composed: true }));
   }
 
   _onRefresh() {
@@ -1936,34 +1924,24 @@ async function loadSession(id) {
 }
 
 // =============================================================================
-// Section 11: init — entry point
+// Section 11: init — entry point  (v3)
 // Wires toolbar CustomEvents to state mutations and kicks off initial data load.
-// Also wires keyboard shortcuts for zoom/pan.
+// Body events (toggle-expand, session-select, detail-close) are wired on acv-body.
+// Keyboard shortcuts use setViewport for zoom/pan.
 // =============================================================================
 
 async function init() {
   const toolbar = document.querySelector('acv-toolbar');
 
-  // Wire: session-change → load the selected session
+  // Wire toolbar events: session-change, refresh, load-more
   if (toolbar) {
+    // Wire: session-change → load the selected session
     toolbar.addEventListener('session-change', async e => {
       try {
         await loadSession(e.detail.id);
       } catch (err) {
         console.error('Failed to switch session:', err);
       }
-    });
-
-    // Wire: zoom-in → decrease ms/px (zoom in = fewer ms per pixel)
-    toolbar.addEventListener('zoom-in', () => {
-      const targetScale = Math.max(ZOOM_MIN, state.timeScale / 1.5);
-      _animateZoom(targetScale, null, null);
-    });
-
-    // Wire: zoom-out → increase ms/px (zoom out = more ms per pixel)
-    toolbar.addEventListener('zoom-out', () => {
-      const targetScale = Math.min(ZOOM_MAX, state.timeScale * 1.5);
-      _animateZoom(targetScale, null, null);
     });
 
     // Wire: refresh → reload all data from server
@@ -1991,11 +1969,11 @@ async function init() {
     });
   }
 
-  // Wire tree events: toggle-expand and session-select
-  const tree = document.querySelector('acv-tree');
-  if (tree) {
+  // Wire body events on acv-body: toggle-expand, session-select, detail-close, span-select
+  const body = document.querySelector('acv-body');
+  if (body) {
     // Wire: toggle-expand → toggle expandedSessions set membership
-    tree.addEventListener('toggle-expand', e => {
+    body.addEventListener('toggle-expand', e => {
       const id = e.detail.id;
       if (state.expandedSessions.has(id)) {
         state.expandedSessions.delete(id);
@@ -2005,25 +1983,21 @@ async function init() {
       renderAll();
     });
 
-    // Wire: session-select → update activeSessionId and renderAll
-    tree.addEventListener('session-select', e => {
+    // Wire: session-select → update activeSessionId
+    body.addEventListener('session-select', e => {
       state.activeSessionId = e.detail.id;
       renderAll();
     });
-  }
 
-  // Wire timeline events: span-select and detail-close
-  const timeline = document.querySelector('acv-timeline');
-  if (timeline) {
-    // Wire: span-select → set state.selectedSpan and call renderAll()
-    timeline.addEventListener('span-select', e => {
-      state.selectedSpan = e.detail.span;
+    // Wire: detail-close → clear selectedSpan
+    body.addEventListener('detail-close', () => {
+      state.selectedSpan = null;
       renderAll();
     });
 
-    // Wire: detail-close → clear state.selectedSpan and call renderAll()
-    timeline.addEventListener('detail-close', () => {
-      state.selectedSpan = null;
+    // Wire: span-select → set state.selectedSpan
+    body.addEventListener('span-select', e => {
+      state.selectedSpan = e.detail.span;
       renderAll();
     });
   }
@@ -2040,30 +2014,44 @@ async function init() {
 
     switch (e.code) {
       case 'KeyW':
-      case 'Equal': // = key (zoom in)
+      case 'Equal': { // = key (zoom in, factor 0.7^shift)
         e.preventDefault();
-        _animateZoom(Math.max(ZOOM_MIN, state.timeScale * Math.pow(0.7, shift)), null, null);
+        const zoomInFactor = Math.pow(0.7, shift);
+        const ziSpan = state.viewportEndMs - state.viewportStartMs;
+        const ziMid  = (state.viewportStartMs + state.viewportEndMs) / 2;
+        const ziNew  = ziSpan * zoomInFactor;
+        setViewport(ziMid - ziNew / 2, ziMid + ziNew / 2);
         break;
+      }
 
       case 'KeyS':
-      case 'Minus': // - key (zoom out)
+      case 'Minus': { // - key (zoom out, factor 1.3^shift)
         e.preventDefault();
-        _animateZoom(Math.min(ZOOM_MAX, state.timeScale * Math.pow(1.3, shift)), null, null);
+        const zoomOutFactor = Math.pow(1.3, shift);
+        const zoSpan = state.viewportEndMs - state.viewportStartMs;
+        const zoMid  = (state.viewportStartMs + state.viewportEndMs) / 2;
+        const zoNew  = zoSpan * zoomOutFactor;
+        setViewport(zoMid - zoNew / 2, zoMid + zoNew / 2);
         break;
+      }
 
       case 'KeyA':
-      case 'ArrowLeft':
+      case 'ArrowLeft': { // pan left (20% * shift of visible span)
         e.preventDefault();
-        state.scrollLeft = Math.max(0, state.scrollLeft - 150 * shift);
-        renderAll();
+        const panLSpan  = state.viewportEndMs - state.viewportStartMs;
+        const panLDelta = panLSpan * 0.2 * shift;
+        setViewport(state.viewportStartMs - panLDelta, state.viewportEndMs - panLDelta);
         break;
+      }
 
       case 'KeyD':
-      case 'ArrowRight':
+      case 'ArrowRight': { // pan right (20% * shift of visible span)
         e.preventDefault();
-        state.scrollLeft = state.scrollLeft + 150 * shift;
-        renderAll();
+        const panRSpan  = state.viewportEndMs - state.viewportStartMs;
+        const panRDelta = panRSpan * 0.2 * shift;
+        setViewport(state.viewportStartMs + panRDelta, state.viewportEndMs + panRDelta);
         break;
+      }
 
       case 'Escape':
         state.selectedSpan = null;
@@ -2072,7 +2060,7 @@ async function init() {
     }
   });
 
-  // Initial data load
+  // Initial data load: fetchSessions then loadSession first session
   state.loading = true;
   renderAll(); // immediately show loading state
 
