@@ -25,6 +25,7 @@ const RULER_H     = 28;    // px ruler strip height
 const SPAN_H      = 20;    // px span bar height
 const HEATMAP_H   = 20;    // px heatmap row height
 const IO_TRUNCATE = 500;   // chars before "show more"
+const MIN_SPAN_MS = 100;   // minimum viewport span in milliseconds
 
 // =============================================================================
 // Section 1: State
@@ -44,6 +45,10 @@ const state = {
   hasMore:         false, // whether more sessions can be loaded
   loading: false,          // true while fetchSession/fetchSpans in flight
   _zoomAnimRaf:    null,  // requestAnimationFrame handle for in-flight zoom animation
+  totalDurationMs: 0,    // total session duration in ms (v3 viewport model)
+  viewportStartMs: 0,    // viewport start time in ms (v3 viewport model)
+  viewportEndMs:   0,    // viewport end time in ms (v3 viewport model)
+  _animRaf:        null, // requestAnimationFrame handle for in-flight viewport animation
 };
 
 // =============================================================================
@@ -69,6 +74,112 @@ function renderAll() {
   // Push loading flag directly to timeline (so #draw() sees it before the RAF fires)
   const _tl = document.querySelector('acv-timeline');
   if (_tl) _tl.loading = state.loading;
+}
+
+// =============================================================================
+// Section 3b: Coordinate helpers (v3 viewport model)
+// =============================================================================
+
+/**
+ * Convert a time value in milliseconds to a canvas pixel x-position.
+ * Uses state.viewportStartMs / viewportEndMs as the visible range.
+ *
+ * @param {number} ms      - time value in milliseconds
+ * @param {number} canvasW - canvas width in pixels
+ * @returns {number}       - pixel x-position
+ */
+function timeToPixel(ms, canvasW) {
+  const span = state.viewportEndMs - state.viewportStartMs;
+  if (span === 0) return 0;
+  return (ms - state.viewportStartMs) / span * canvasW;
+}
+
+/**
+ * Convert a canvas pixel x-position to a time value in milliseconds.
+ * Uses state.viewportStartMs / viewportEndMs as the visible range.
+ *
+ * @param {number} px      - pixel x-position
+ * @param {number} canvasW - canvas width in pixels
+ * @returns {number}       - time value in milliseconds
+ */
+function pixelToTime(px, canvasW) {
+  if (canvasW === 0) return state.viewportStartMs;
+  return state.viewportStartMs + (px / canvasW) * (state.viewportEndMs - state.viewportStartMs);
+}
+
+/**
+ * Return milliseconds per pixel for the current viewport.
+ *
+ * @param {number} canvasW - canvas width in pixels
+ * @returns {number}       - ms per pixel
+ */
+function msPerPx(canvasW) {
+  if (canvasW === 0) return 0;
+  return (state.viewportEndMs - state.viewportStartMs) / canvasW;
+}
+
+/**
+ * Set the viewport to the given time range, optionally animating the transition.
+ * Enforces a minimum span of MIN_SPAN_MS to prevent extreme zoom.
+ *
+ * @param {number}  startMs - new viewport start in milliseconds
+ * @param {number}  endMs   - new viewport end in milliseconds
+ * @param {boolean} animate - if true (default), animate the transition
+ */
+function setViewport(startMs, endMs, animate = true) {
+  // Enforce minimum span
+  let span = endMs - startMs;
+  if (span < MIN_SPAN_MS) {
+    const mid = (startMs + endMs) / 2;
+    startMs = mid - MIN_SPAN_MS / 2;
+    endMs = mid + MIN_SPAN_MS / 2;
+  }
+  if (animate) {
+    _animateViewport(startMs, endMs);
+  } else {
+    state.viewportStartMs = startMs;
+    state.viewportEndMs = endMs;
+    renderAll();
+  }
+}
+
+/**
+ * Animate state.viewportStartMs / viewportEndMs from their current values to
+ * targetStart / targetEnd over 100ms using easeOutQuad easing.
+ *
+ * @param {number} targetStart - target viewport start in milliseconds
+ * @param {number} targetEnd   - target viewport end in milliseconds
+ */
+function _animateViewport(targetStart, targetEnd) {
+  const DURATION = 100; // ms
+  const fromStart = state.viewportStartMs;
+  const fromEnd   = state.viewportEndMs;
+  const t0        = performance.now();
+
+  // Cancel any in-flight viewport animation before starting a new one
+  if (state._animRaf !== null) {
+    cancelAnimationFrame(state._animRaf);
+    state._animRaf = null;
+  }
+
+  function step(now) {
+    const elapsed = now - t0;
+    const t = Math.min(elapsed / DURATION, 1);
+    // easeOutQuad: t * (2 - t)
+    const eased = t * (2 - t);
+    state.viewportStartMs = fromStart + (targetStart - fromStart) * eased;
+    state.viewportEndMs   = fromEnd   + (targetEnd   - fromEnd)   * eased;
+    renderAll();
+    if (t < 1) {
+      state._animRaf = requestAnimationFrame(step);
+    } else {
+      state.viewportStartMs = targetStart;
+      state.viewportEndMs   = targetEnd;
+      state._animRaf = null;
+      renderAll();
+    }
+  }
+  state._animRaf = requestAnimationFrame(step);
 }
 
 // =============================================================================
@@ -304,6 +415,26 @@ function _rowIndexMap(sessionData, expanded) {
   const map = new Map();
   rows.forEach((n, i) => map.set(n.session_id, i));
   return map;
+}
+
+/**
+ * Walk the session tree and return visible nodes with their depth for indentation.
+ * Like _visibleRows but returns {node, depth} objects so labels can be indented.
+ *
+ * @param {Object} node     - root session node (has .children array)
+ * @param {Set}    expanded - set of expanded session IDs
+ * @returns {Array}         - flat array of {node, depth} objects in display order
+ */
+function _visibleRowsWithDepth(node, expanded) {
+  const rows = [];
+  function walk(n, depth) {
+    rows.push({ node: n, depth });
+    if (expanded.has(n.session_id) && n.children?.length) {
+      for (const child of n.children) walk(child, depth + 1);
+    }
+  }
+  walk(node, 0);
+  return rows;
 }
 
 /**

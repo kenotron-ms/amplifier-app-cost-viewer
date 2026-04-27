@@ -1872,3 +1872,118 @@ class TestDetailPanelFormatting:
             "AcvDetail I/O content blocks must use white-space: pre-wrap "
             "to preserve line breaks in content display"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: v3 viewport state model
+# ---------------------------------------------------------------------------
+
+
+class TestV3StateModel:
+    """Verify that v3 state fields and MIN_SPAN_MS constant are added."""
+
+    def test_min_span_ms_constant(self, app_js_code: str) -> None:
+        """MIN_SPAN_MS = 100 constant must be defined."""
+        assert "MIN_SPAN_MS = 100" in app_js_code, (
+            "app.js must define 'const MIN_SPAN_MS = 100' constant"
+        )
+
+    def test_state_has_total_duration_ms(self, app_js_code: str) -> None:
+        """state must have totalDurationMs field initialised to 0."""
+        assert "totalDurationMs" in app_js_code, (
+            "state object must declare 'totalDurationMs' field"
+        )
+
+    def test_state_has_viewport_start_ms(self, app_js_code: str) -> None:
+        """state must have viewportStartMs field initialised to 0."""
+        assert "viewportStartMs" in app_js_code, (
+            "state object must declare 'viewportStartMs' field"
+        )
+
+    def test_state_has_viewport_end_ms(self, app_js_code: str) -> None:
+        """state must have viewportEndMs field initialised to 0."""
+        assert "viewportEndMs" in app_js_code, (
+            "state object must declare 'viewportEndMs' field"
+        )
+
+    def test_state_has_anim_raf(self, app_js_code: str) -> None:
+        """state must have _animRaf field for viewport animation handle."""
+        assert "_animRaf" in app_js_code, (
+            "state object must declare '_animRaf' field (viewport animation RAF handle)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: v3 coordinate helpers
+# ---------------------------------------------------------------------------
+
+
+class TestV3CoordinateHelpers:
+    """Verify timeToPixel, pixelToTime, msPerPx helper functions are defined."""
+
+    def test_time_to_pixel_defined(self, app_js_code: str) -> None:
+        """timeToPixel(ms, canvasW) must be defined."""
+        assert "function timeToPixel" in app_js_code, (
+            "app.js must define 'function timeToPixel(ms, canvasW)'"
+        )
+
+    def test_pixel_to_time_defined(self, app_js_code: str) -> None:
+        """pixelToTime(px, canvasW) must be defined."""
+        assert "function pixelToTime" in app_js_code, (
+            "app.js must define 'function pixelToTime(px, canvasW)'"
+        )
+
+    def test_ms_per_px_defined(self, app_js_code: str) -> None:
+        """msPerPx(canvasW) must be defined."""
+        assert "function msPerPx" in app_js_code, (
+            "app.js must define 'function msPerPx(canvasW)'"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: v3 setViewport / _animateViewport
+# ---------------------------------------------------------------------------
+
+
+class TestV3SetViewport:
+    """Verify setViewport and _animateViewport functions."""
+
+    def test_set_viewport_defined(self, app_js_code: str) -> None:
+        """setViewport(startMs, endMs, animate) must be defined."""
+        assert "function setViewport" in app_js_code, (
+            "app.js must define 'function setViewport'"
+        )
+
+    def test_animate_viewport_defined(self, app_js_code: str) -> None:
+        """_animateViewport(targetStart, targetEnd) must be defined."""
+        assert "function _animateViewport" in app_js_code, (
+            "app.js must define 'function _animateViewport'"
+        )
+
+    def test_set_viewport_has_animate_param(self, app_js_code: str) -> None:
+        """setViewport must accept an animate parameter defaulting to true."""
+        assert "animate = true" in app_js_code or "animate=true" in app_js_code, (
+            "setViewport must have 'animate = true' default parameter"
+        )
+
+    def test_animate_viewport_uses_ease_out_quad(self, app_js_code: str) -> None:
+        """_animateViewport must use easeOutQuad easing."""
+        assert "easeOutQuad" in app_js_code, (
+            "_animateViewport must use easeOutQuad easing (comment or variable name)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: v3 _visibleRowsWithDepth
+# ---------------------------------------------------------------------------
+
+
+class TestV3VisibleRowsWithDepth:
+    """Verify _visibleRowsWithDepth helper is defined."""
+
+    def test_visible_rows_with_depth_defined(self, app_js_code: str) -> None:
+        """_visibleRowsWithDepth(node, expanded) must be defined."""
+        assert "function _visibleRowsWithDepth" in app_js_code, (
+            "app.js must define 'function _visibleRowsWithDepth(node, expanded)' "
+            "that returns {node, depth} objects for label indentation"
+        )
