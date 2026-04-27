@@ -940,6 +940,13 @@ class AcvBody extends HTMLElement {
   _render() {
     const sd = state.sessionData;
     const rows = sd ? _visibleRowsWithDepth(sd, state.expandedSessions) : [];
+    this.#totalRows = rows.length;
+    this.#computeVirtualWindow();
+    const first = this.#firstVisible;
+    const last = this.#lastVisible;
+    const visibleSlice = rows.slice(first, last + 1);
+    const topSpacerH = first * this.#rowH;
+    const bottomSpacerH = Math.max(0, (rows.length - last - 1) * this.#rowH);
 
     render(html`
       <style>
@@ -1040,16 +1047,18 @@ class AcvBody extends HTMLElement {
             </tr>
           </thead>
           <tbody>
-            ${rows.map(({ node, depth }, i) => {
+            <tr class="spacer-top" style="height: ${topSpacerH}px;"><td colspan="2"></td></tr>
+            ${visibleSlice.map(({ node, depth }, sliceIdx) => {
+              const absIdx = first + sliceIdx;
               const hasChildren = (node.children?.length ?? 0) > 0;
               const isExpanded = state.expandedSessions.has(node.session_id);
               const toggle = hasChildren ? (isExpanded ? '▾' : '▸') : '\u00a0';
               const cost = node.total_cost_usd || 0;
               const name = node.name || node.agent_name || node.session_id.slice(-8);
-              const bg = i % 2 === 0 ? '#0d1117' : '#161b22';
+              const bg = absIdx % 2 === 0 ? '#0d1117' : '#161b22';
               const indent = 8 + depth * 14;
               return html`
-                <tr>
+                <tr class="data-row">
                   <td
                     class="td-label"
                     style="padding-left: ${indent}px; background: ${bg};"
@@ -1059,6 +1068,7 @@ class AcvBody extends HTMLElement {
                   <td class="td-canvas" style="background: ${bg};"></td>
                 </tr>`;
             })}
+            <tr class="spacer-bottom" style="height: ${bottomSpacerH}px;"><td colspan="2"></td></tr>
           </tbody>
         </table>
         <canvas id="main-canvas"></canvas>
@@ -1133,7 +1143,7 @@ class AcvBody extends HTMLElement {
 
     // Measure actual rendered dimensions — border-bottom adds pixels the constant doesn't know about
     const theadEl = this._root.querySelector('thead');
-    const firstTr = tbody.querySelector('tr');
+    const firstTr = tbody.querySelector('tr.data-row');
     if (theadEl) {
       const measured = Math.round(theadEl.getBoundingClientRect().height);
       if (measured > 0) this.#theadH = measured;
