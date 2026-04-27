@@ -114,6 +114,20 @@ function msPerPx(canvasW) {
 }
 
 /**
+ * Overview coordinate — maps [0, totalDurationMs] to [0, canvasW].
+ * Different from timeToPixel which maps [viewportStartMs, viewportEndMs].
+ * ONLY used by AcvOverview. Never use timeToPixel in the overview.
+ *
+ * @param {number} ms      - time value in milliseconds
+ * @param {number} canvasW - overview canvas width in CSS pixels
+ * @returns {number}       - pixel x-position
+ */
+function ovTimeToPixel(ms, canvasW) {
+  if (!state.totalDurationMs) return 0;
+  return (ms / state.totalDurationMs) * canvasW;
+}
+
+/**
  * Set the viewport to the given time range, optionally animating the transition.
  * Enforces a minimum span of MIN_SPAN_MS to prevent extreme zoom.
  *
@@ -591,19 +605,55 @@ class AcvToolbar extends HTMLElement {
 customElements.define('acv-toolbar', AcvToolbar);
 
 // =============================================================================
-// Section 9: Custom element — AcvOverview  (placeholder)
-// Thin 60px strip above the detail drawer. Phase 2 will add canvas rendering.
+// =============================================================================
+// Section 9: Custom element — AcvOverview
+// Thin 60px strip above the detail drawer. Canvas minimap of compressed spans.
 // =============================================================================
 
 class AcvOverview extends HTMLElement {
+  // ── Private canvas state ────────────────────────────────────────────────
+  #canvas = null;
+  #ctx = null;
+  #rafId = null;
+  #resizeObserver = null;
+  // drag fields declared upfront for Task 3
+  #dragMode = null;
+  #dragStartX = 0;
+  #dragStartMs = 0;
+
   constructor() {
     super();
     this._root = this.attachShadow({ mode: 'open' });
   }
 
   connectedCallback() {
-    subscribe(() => this._render());
+    subscribe(() => this.notify());
     this._render();
+    requestAnimationFrame(() => {
+      this.#ensureCanvas();
+      this.#scheduleRedraw();
+      this.#setupResizeObserver();
+    });
+  }
+
+  disconnectedCallback() {
+    if (this.#resizeObserver) {
+      this.#resizeObserver.disconnect();
+      this.#resizeObserver = null;
+    }
+    if (this.#rafId) {
+      cancelAnimationFrame(this.#rafId);
+      this.#rafId = null;
+    }
+  }
+
+  /** Called on every state change to re-render template + canvas. */
+  notify() {
+    this._render();
+    requestAnimationFrame(() => {
+      this.#ensureCanvas();
+      this.#scheduleRedraw();
+    });
   }
 
   _render() {
@@ -616,21 +666,97 @@ class AcvOverview extends HTMLElement {
           background: var(--surface, #161b22);
           border-bottom: 1px solid var(--border, #30363d);
           box-sizing: border-box;
+          position: relative;
+          overflow: hidden;
         }
-        .placeholder {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          height: 100%;
-          font-family: monospace;
-          font-size: 11px;
-          color: var(--muted, #8b949e);
+        canvas {
+          display: block;
+          position: absolute;
+          top: 0;
+          left: 0;
         }
       </style>
-      <div class="placeholder">
-        ${state.sessionData ? 'overview — Phase 2' : 'overview — no session'}
-      </div>
+      <canvas id="ov-canvas"></canvas>
     `, this._root);
+  }
+
+  #setupResizeObserver() {
+    this.#resizeObserver = new ResizeObserver(() => {
+      this.#ensureCanvas();
+      this.#scheduleRedraw();
+    });
+    this.#resizeObserver.observe(this);
+  }
+
+  #ensureCanvas() {
+    const canvas = this._root.getElementById('ov-canvas');
+    if (!canvas) return;
+    const dpr  = window.devicePixelRatio || 1;
+    const rect = this.getBoundingClientRect();
+    const cssW = Math.max(1, Math.round(rect.width));
+    const cssH = Math.max(1, Math.round(rect.height));
+    if (canvas.style.width !== cssW + 'px' || canvas.style.height !== cssH + 'px' ||
+        canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
+      canvas.style.width  = cssW + 'px';
+      canvas.style.height = cssH + 'px';
+      canvas.width  = Math.round(cssW * dpr);
+      canvas.height = Math.round(cssH * dpr);
+      this.#ctx    = canvas.getContext('2d');
+      this.#ctx.scale(dpr, dpr);
+      this.#canvas = canvas;
+    } else if (!this.#ctx) {
+      this.#ctx    = canvas.getContext('2d');
+      this.#canvas = canvas;
+    }
+  }
+
+  #scheduleRedraw() {
+    if (this.#rafId) cancelAnimationFrame(this.#rafId);
+    this.#rafId = requestAnimationFrame(() => {
+      this.#rafId = null;
+      this.#draw();
+    });
+  }
+
+  #draw() {
+    const ctx    = this.#ctx;
+    const canvas = this.#canvas;
+    if (!ctx || !canvas) return;
+    const W = parseFloat(canvas.style.width)  || canvas.width  / (window.devicePixelRatio || 1);
+    const H = parseFloat(canvas.style.height) || canvas.height / (window.devicePixelRatio || 1);
+    ctx.clearRect(0, 0, W, H);
+
+    // Background
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, W, H);
+
+    if (!state.spans || state.spans.length === 0 || !state.totalDurationMs) return;
+
+    const rowMap    = state.sessionData
+      ? _rowIndexMap(state.sessionData, state.expandedSessions)
+      : new Map();
+    const totalRows = rowMap.size || 1;
+    const rowH      = Math.min(8, H / totalRows);
+
+    // Color-batched compressed span rectangles
+    const batches = new Map();
+    for (const span of state.spans) {
+      const rowIdx = rowMap.get(span.session_id);
+      if (rowIdx === undefined) continue;
+      const y = rowIdx * rowH;
+      const x = ovTimeToPixel(span.start_ms || 0, W);
+      const w = Math.max(1, ovTimeToPixel(span.end_ms || 0, W) - x);
+      const color = span.color || '#64748B';
+      if (!batches.has(color)) batches.set(color, []);
+      batches.get(color).push({ x, y, w, h: rowH });
+    }
+
+    for (const [color, rects] of batches) {
+      ctx.beginPath();
+      for (const r of rects) ctx.rect(r.x, r.y, r.w, r.h);
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
   }
 }
 

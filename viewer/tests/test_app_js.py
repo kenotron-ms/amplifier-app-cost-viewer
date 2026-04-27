@@ -1925,3 +1925,81 @@ def test_draw_renders_row_borders(app_js_code: str) -> None:
     # Must draw lines (moveTo + lineTo for row separators)
     assert "moveTo(0" in app_js_code
     assert "lineTo(W" in app_js_code
+
+
+# ---------------------------------------------------------------------------
+# Tests: Phase 2 — ovTimeToPixel coordinate helper
+# ---------------------------------------------------------------------------
+
+
+class TestP2OvTimeToPixel:
+    """Verify the ovTimeToPixel module-level coordinate helper."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_ov_time_to_pixel_defined(self) -> None:
+        """ovTimeToPixel must be defined as a module-level function."""
+        assert "function ovTimeToPixel" in self.content, (
+            "app.js must define a module-level 'function ovTimeToPixel'"
+        )
+
+    def test_ov_time_to_pixel_uses_total_duration(self) -> None:
+        """ovTimeToPixel must reference totalDurationMs for its calculation."""
+        assert "totalDurationMs" in self.content, (
+            "ovTimeToPixel must use state.totalDurationMs for coordinate mapping"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Phase 2 — AcvOverview canvas rendering
+# ---------------------------------------------------------------------------
+
+
+class TestP2OverviewCanvas:
+    """Verify AcvOverview has real canvas rendering, not the Phase 1 placeholder."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_overview_has_canvas_element(self) -> None:
+        """AcvOverview shadow DOM must contain a <canvas id='ov-canvas'>."""
+        assert "ov-canvas" in self.content, (
+            "AcvOverview must render a canvas element with id='ov-canvas'"
+        )
+
+    def test_overview_no_placeholder(self) -> None:
+        """AcvOverview placeholder text 'overview — Phase 2' must be removed."""
+        assert "overview \u2014 Phase 2" not in self.content, (
+            "AcvOverview must not contain the Phase 1 placeholder text 'overview — Phase 2'"
+        )
+
+    def test_overview_has_resize_observer(self) -> None:
+        """AcvOverview must use a ResizeObserver to handle canvas resizing."""
+        assert "#resizeObserver" in self.content or "_resizeObserver" in self.content, (
+            "AcvOverview must declare and use a #resizeObserver (or _resizeObserver) field"
+        )
+
+    def test_overview_has_notify_method(self) -> None:
+        """AcvOverview must implement a notify() method following the subscribe pattern."""
+        assert "notify()" in self.content, (
+            "AcvOverview must define a notify() method matching the AcvBody pattern"
+        )
+
+    def test_overview_draws_compressed_spans(self) -> None:
+        """AcvOverview #draw() must use ovTimeToPixel for span x-positions."""
+        assert "ovTimeToPixel" in self.content, (
+            "AcvOverview #draw() must call ovTimeToPixel() for compressed span positioning"
+        )
+
+    def test_overview_uses_row_index_map(self) -> None:
+        """AcvOverview #draw() must use _rowIndexMap for row ordering."""
+        assert "_rowIndexMap" in self.content, (
+            "AcvOverview #draw() must call _rowIndexMap() to determine row y-positions"
+        )
+
+    def test_overview_color_batches_spans(self) -> None:
+        """AcvOverview #draw() must use color-batched drawing (batches Map)."""
+        assert "batches" in self.content, (
+            "AcvOverview #draw() must use a 'batches' Map for color-batched span rendering"
+        )
