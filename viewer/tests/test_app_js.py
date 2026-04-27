@@ -871,9 +871,9 @@ class TestAcvDetail:
             "AcvDetail .panel must have background #161b22"
         )
 
-    def test_panel_class_max_height_40vh(self) -> None:
-        # .panel with max-height 40vh
-        assert "40vh" in self.content, "AcvDetail .panel must have max-height 40vh"
+    def test_panel_class_max_height_85vh(self) -> None:
+        # .panel with max-height 85vh (updated from 40vh — panel is now resizable, 50vh default)
+        assert "85vh" in self.content, "AcvDetail .panel must have max-height 85vh"
 
     def test_panel_class_overflow_y_auto(self) -> None:
         # .panel with overflow-y auto
@@ -2302,3 +2302,74 @@ class TestExtractContentNoObjectObject:
             "_extractContent must use JSON.stringify as fallback for unknown object shapes "
             "so that arbitrary objects display useful information instead of '[object Object]'"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: UI improvements — hover cursor, resizable detail, tabs, JSON tree
+# ---------------------------------------------------------------------------
+
+
+def test_canvas_hover_cursor_pointer(app_js_code: str) -> None:
+    """mousemove on canvas must set cursor to 'pointer' when over a span."""
+    assert "'pointer'" in app_js_code, (
+        "Canvas mousemove handler must set cursor style to 'pointer' when hovering over a span"
+    )
+    assert "overSpan" in app_js_code, (
+        "Canvas mousemove handler must use an 'overSpan' variable for hit-testing"
+    )
+
+
+def test_detail_panel_starts_50vh(app_js_code: str) -> None:
+    """Detail panel must default to 50vh height."""
+    assert "50vh" in app_js_code, (
+        "AcvDetail .panel must have 'height: 50vh' as the default starting height"
+    )
+
+
+def test_detail_has_drag_handle(app_js_code: str) -> None:
+    """Detail panel must have a drag handle for resizing."""
+    assert "drag-handle" in app_js_code, (
+        "AcvDetail must define a .drag-handle element for panel resizing"
+    )
+    assert "ns-resize" in app_js_code, (
+        "AcvDetail .drag-handle must use 'cursor: ns-resize' to indicate vertical resize"
+    )
+
+
+def test_detail_has_tabs(app_js_code: str) -> None:
+    """Detail panel must have Summary, Input, Output tabs."""
+    assert "tab-bar" in app_js_code, (
+        "AcvDetail must define a .tab-bar element containing the tab buttons"
+    )
+    assert "'summary'" in app_js_code, (
+        "AcvDetail tab bar must include a 'summary' tab"
+    )
+    assert "'input'" in app_js_code, (
+        "AcvDetail tab bar must include an 'input' tab"
+    )
+    assert "'output'" in app_js_code, (
+        "AcvDetail tab bar must include an 'output' tab"
+    )
+
+
+def test_json_tree_renderer_exists(app_js_code: str) -> None:
+    """_renderJsonTree function must exist for collapsible JSON viewing."""
+    assert "_renderJsonTree" in app_js_code, (
+        "app.js must define a '_renderJsonTree' function for collapsible JSON tree rendering"
+    )
+    assert "jv-body" in app_js_code, (
+        "app.js must define '.jv-body' CSS class used by the JSON tree renderer"
+    )
+
+
+def test_view_toggle_exists(app_js_code: str) -> None:
+    """Input/output tabs must have plain text / JSON tree toggle."""
+    assert (
+        "view-toggle" in app_js_code
+        or "viewToggle" in app_js_code
+        or "jsonMode" in app_js_code.lower()
+        or "json_mode" in app_js_code.lower()
+    ), (
+        "AcvDetail Input/Output tabs must have a toggle for plain text vs JSON tree view "
+        "(must contain 'view-toggle', 'viewToggle', 'jsonMode', or 'json_mode')"
+    )

@@ -1432,18 +1432,40 @@ class AcvBody extends HTMLElement {
     });
 
     canvas.addEventListener('mousemove', e => {
-      if (!this.#isDragging) return;
-      const delta = e.clientX - this.#dragStartX;
-      if (Math.abs(delta) > 4) this.#hasDragged = true;
-      if (this.#hasDragged) {
-        const W      = canvas.width / (window.devicePixelRatio || 1);
-        const msDelta = (delta / W) * (this.#dragStartViewportEnd - this.#dragStartViewportStart);
-        setViewport(
-          this.#dragStartViewportStart - msDelta,
-          this.#dragStartViewportEnd   - msDelta,
-          false,
-        );
+      // --- existing drag logic first ---
+      if (this.#isDragging) {
+        const delta = e.clientX - this.#dragStartX;
+        if (Math.abs(delta) > 4) this.#hasDragged = true;
+        if (this.#hasDragged) {
+          const W      = canvas.width / (window.devicePixelRatio || 1);
+          const msDelta = (delta / W) * (this.#dragStartViewportEnd - this.#dragStartViewportStart);
+          setViewport(
+            this.#dragStartViewportStart - msDelta,
+            this.#dragStartViewportEnd   - msDelta,
+            false,
+          );
+        }
+        return;
       }
+      // --- cursor feedback for hoverable spans ---
+      const W = parseFloat(canvas.style.width) || canvas.width;
+      const rect = canvas.getBoundingClientRect();
+      const hoverX = e.clientX - rect.left;
+      const hoverMs = pixelToTime(hoverX, W);
+      const hoverY = e.clientY - rect.top;
+      const rowMap = state.sessionData ? _rowIndexMap(state.sessionData, state.expandedSessions) : new Map();
+      const hoverRow = Math.floor((hoverY) / this.#rowH);
+
+      let overSpan = false;
+      for (const span of (state.spans || [])) {
+        const rowIdx = rowMap.get(span.session_id);
+        if (rowIdx !== hoverRow) continue;
+        if (hoverMs >= (span.start_ms || 0) && hoverMs <= (span.end_ms || 0)) {
+          overSpan = true;
+          break;
+        }
+      }
+      canvas.style.cursor = overSpan ? 'pointer' : 'grab';
     });
 
     const stopDrag = () => {
@@ -1545,9 +1567,70 @@ customElements.define('acv-body', AcvBody);
 // Section 10: Custom element — AcvDetail  (full implementation)
 // Detail drawer shown at the bottom when a span is selected.
 // Shadow DOM component with timing, token, cost rows and I/O blocks.
+// Supports: resizable panel (50vh default), Summary/Input/Output tabs,
+//           plain text ↔ collapsible JSON tree toggle per tab.
 // =============================================================================
 
+// ---------------------------------------------------------------------------
+// JSON tree renderer — pure Lit, no external libraries
+// ---------------------------------------------------------------------------
+
+function _renderJsonTree(value, depth = 0) {
+  if (value === null)      return html`<span class="jv-null">null</span>`;
+  if (value === undefined) return html`<span class="jv-null">undefined</span>`;
+  if (typeof value === 'boolean') return html`<span class="jv-bool">${String(value)}</span>`;
+  if (typeof value === 'number')  return html`<span class="jv-num">${value}</span>`;
+  if (typeof value === 'string') {
+    const display = value.length > 200 ? value.slice(0, 200) + '…' : value;
+    return html`<span class="jv-str">"${display}"</span>`;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return html`<span class="jv-punc">[]</span>`;
+    return html`
+      <details ?open=${depth < 2}>
+        <summary class="jv-summary"><span class="jv-punc">[</span><span class="jv-count">${value.length} items</span><span class="jv-punc">]</span></summary>
+        <div class="jv-body">
+          ${value.map((v, i) => html`
+            <div class="jv-row">
+              <span class="jv-key">${i}</span>
+              <span class="jv-colon">:</span>
+              ${_renderJsonTree(v, depth + 1)}
+            </div>
+          `)}
+        </div>
+      </details>
+    `;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (entries.length === 0) return html`<span class="jv-punc">{}</span>`;
+    return html`
+      <details ?open=${depth < 2}>
+        <summary class="jv-summary"><span class="jv-punc">{</span><span class="jv-count">${entries.length} keys</span><span class="jv-punc">}</span></summary>
+        <div class="jv-body">
+          ${entries.map(([k, v]) => html`
+            <div class="jv-row">
+              <span class="jv-key">"${k}"</span>
+              <span class="jv-colon">:</span>
+              ${_renderJsonTree(v, depth + 1)}
+            </div>
+          `)}
+        </div>
+      </details>
+    `;
+  }
+  return html`<span>${String(value)}</span>`;
+}
+
+// ---------------------------------------------------------------------------
+// AcvDetail custom element
+// ---------------------------------------------------------------------------
+
 class AcvDetail extends HTMLElement {
+  #activeTab    = 'summary';
+  #jsonMode     = new Map();   // key: spanId+'_'+tabName → boolean (true = JSON tree)
+  #resizeWired  = false;
+
   constructor() {
     super();
     this._root = this.attachShadow({ mode: 'open' });
@@ -1570,20 +1653,100 @@ class AcvDetail extends HTMLElement {
       <style>${this.#styles()}</style>
       ${span ? html`
         <div class="panel">
+          <div class="drag-handle"></div>
           <div class="header">
             <span class="title">${this.#titleFor(span)}</span>
             <button class="close-btn" @click=${() => this.#onClose()}>✕</button>
           </div>
-          <div class="detail-stats">
-            ${this.#statsBlock(span)}
+          <div class="tab-bar">
+            ${['summary', 'input', 'output'].map(t => html`
+              <button class="tab ${this.#activeTab === t ? 'active' : ''}"
+                      data-tab="${t}"
+                      @click=${() => { this.#activeTab = t; this.update(); }}>
+                ${t.charAt(0).toUpperCase() + t.slice(1)}
+              </button>
+            `)}
           </div>
-          ${span.type !== 'thinking' ? html`
-            ${this.#contentBlock('INPUT', span.input, span.type)}
-            ${this.#contentBlock('OUTPUT', span.output, span.type)}
-          ` : ''}
+          <div class="tab-content">
+            ${this.#renderTab(span)}
+          </div>
         </div>
       ` : html`<div class="hidden"></div>`}
     `, this._root);
+
+    // Wire drag-handle resize once per panel lifetime
+    if (span) {
+      const handle = this._root.querySelector('.drag-handle');
+      const panel  = this._root.querySelector('.panel');
+      if (handle && panel && !this.#resizeWired) {
+        this.#wireResize(handle, panel);
+        this.#resizeWired = true;
+      }
+    } else {
+      this.#resizeWired = false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: tab content dispatcher
+  // ---------------------------------------------------------------------------
+
+  #renderTab(span) {
+    if (this.#activeTab === 'summary') {
+      return html`<div class="detail-stats">${this.#statsBlock(span)}</div>`;
+    }
+    if (this.#activeTab === 'input') {
+      return this.#ioTabContent(span, 'input', span.input);
+    }
+    if (this.#activeTab === 'output') {
+      return this.#ioTabContent(span, 'output', span.output);
+    }
+    return '';
+  }
+
+  /** Renders the I/O tab content with plain-text ↔ JSON tree toggle. */
+  #ioTabContent(span, tabName, value) {
+    if (value == null) return html`<div class="empty">—</div>`;
+    const key    = (span.session_id || '') + '_' + tabName;
+    const isJson = this.#jsonMode.get(key) || false;
+    const toggle = () => { this.#jsonMode.set(key, !isJson); this.update(); };
+    const label  = tabName === 'input' ? 'INPUT' : 'OUTPUT';
+    return html`
+      <div class="io-container">
+        <button class="view-toggle" @click=${toggle}>
+          ${isJson ? 'Plain Text' : 'JSON Tree'}
+        </button>
+        ${isJson
+          ? html`<div class="jv-root">${_renderJsonTree(value)}</div>`
+          : this.#contentBlock(label, value, span.type)
+        }
+      </div>
+    `;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: resize drag handle
+  // ---------------------------------------------------------------------------
+
+  #wireResize(handle, panel) {
+    let startY = 0;
+    let startH = 0;
+    handle.addEventListener('mousedown', e => {
+      startY = e.clientY;
+      startH = panel.offsetHeight;
+      const onMove = ev => {
+        const delta = startY - ev.clientY;   // drag up = bigger
+        const newH  = Math.max(80, Math.min(window.innerHeight * 0.85, startH + delta));
+        panel.style.height = newH + 'px';
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup',   onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup',   onUp);
+      e.preventDefault();
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -1748,22 +1911,56 @@ class AcvDetail extends HTMLElement {
     return `
       :host { display: block; }
       .hidden { display: none; }
+
+      /* ---- Panel shell ---- */
       .panel {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 50vh;
+        min-height: 80px;
+        max-height: 85vh;
         background: #161b22;
         border-top: 1px solid var(--border, #30363d);
-        max-height: 40vh;
-        overflow-y: auto;
-        padding: 10px 14px;
+        display: flex;
+        flex-direction: column;
+        z-index: 100;
+        overflow: hidden;
         box-sizing: border-box;
         font-family: "SF Mono", Consolas, Monaco, monospace;
         font-size: 12px;
         color: var(--text, #e6edf3);
       }
+
+      /* ---- Drag handle ---- */
+      .drag-handle {
+        height: 6px;
+        flex-shrink: 0;
+        cursor: ns-resize;
+        background: transparent;
+        position: relative;
+      }
+      .drag-handle::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: 40px;
+        height: 3px;
+        background: #30363d;
+        border-radius: 2px;
+      }
+      .drag-handle:hover::after { background: #58a6ff; }
+
+      /* ---- Header ---- */
       .header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 8px;
+        padding: 6px 14px 4px;
+        flex-shrink: 0;
       }
       .title { font-weight: 600; }
       .close-btn {
@@ -1776,6 +1973,39 @@ class AcvDetail extends HTMLElement {
         border-radius: 3px;
       }
       .close-btn:hover { color: var(--text, #e6edf3); }
+
+      /* ---- Tab bar ---- */
+      .tab-bar {
+        display: flex;
+        gap: 1px;
+        background: #0d1117;
+        flex-shrink: 0;
+        padding: 0 8px;
+        border-bottom: 1px solid #30363d;
+      }
+      .tab {
+        padding: 6px 14px;
+        font-size: 11px;
+        font-family: monospace;
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: #8b949e;
+        cursor: pointer;
+      }
+      .tab.active {
+        color: #e6edf3;
+        border-bottom-color: #58a6ff;
+      }
+
+      /* ---- Tab content area ---- */
+      .tab-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 10px 14px;
+      }
+
+      /* ---- Stats grid (summary tab) ---- */
       .detail-stats {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -1800,6 +2030,9 @@ class AcvDetail extends HTMLElement {
         font-weight: 600;
         color: var(--text, #e6edf3);
       }
+
+      /* ---- I/O content blocks ---- */
+      .io-container { position: relative; }
       .io-block { margin-top: 8px; }
       .io-label {
         text-transform: uppercase;
@@ -1829,6 +2062,33 @@ class AcvDetail extends HTMLElement {
         cursor: pointer;
       }
       .show-more:hover { text-decoration: underline; }
+      .empty { color: var(--text-muted, #8b949e); font-style: italic; }
+
+      /* ---- View toggle button ---- */
+      .view-toggle {
+        position: absolute; top: 10px; right: 14px;
+        font-size: 10px; font-family: monospace;
+        background: #21262d; border: 1px solid #30363d;
+        color: #8b949e; border-radius: 4px; padding: 2px 8px; cursor: pointer;
+      }
+      .view-toggle:hover { border-color: #58a6ff; color: #e6edf3; }
+
+      /* ---- JSON tree ---- */
+      .jv-root { padding-top: 4px; font-size: 11px; }
+      .jv-body { padding-left: 16px; border-left: 1px solid #21262d; margin-left: 4px; }
+      .jv-row  { display: flex; align-items: flex-start; gap: 4px; line-height: 1.6; flex-wrap: wrap; }
+      .jv-key   { color: #79c0ff; }
+      .jv-str   { color: #a5d6ff; word-break: break-all; }
+      .jv-num   { color: #79c0ff; }
+      .jv-bool  { color: #ff7b72; }
+      .jv-null  { color: #8b949e; }
+      .jv-punc  { color: #8b949e; }
+      .jv-colon { color: #8b949e; }
+      .jv-count { font-size: 10px; color: #8b949e; margin: 0 4px; }
+      .jv-summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 2px; }
+      .jv-summary::-webkit-details-marker { display: none; }
+      details > summary::before { content: '▶'; font-size: 8px; color: #8b949e; margin-right: 4px; }
+      details[open] > summary::before { content: '▼'; }
     `;
   }
 }
