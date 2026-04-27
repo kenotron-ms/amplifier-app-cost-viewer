@@ -2122,3 +2122,128 @@ class TestP2OverviewInteractions:
         assert "mouseup" in self.content, (
             "AcvOverview #wireOverviewEvents must register a 'mouseup' event listener"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Virtual scrolling in AcvBody
+# ---------------------------------------------------------------------------
+
+
+class TestVirtualScroll:
+    """Verify AcvBody implements virtual scrolling — only visible rows in DOM."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    # -- Constants and state fields --
+
+    def test_virtual_buffer_constant(self) -> None:
+        """Must define a VIRTUAL_BUFFER constant for overscan rows."""
+        assert "VIRTUAL_BUFFER" in self.content, (
+            "app.js must define a VIRTUAL_BUFFER constant (e.g. const VIRTUAL_BUFFER = 5)"
+        )
+
+    def test_first_visible_field(self) -> None:
+        """AcvBody must track #firstVisible for virtual window start."""
+        assert "#firstVisible" in self.content, (
+            "AcvBody must declare a #firstVisible private field"
+        )
+
+    def test_last_visible_field(self) -> None:
+        """AcvBody must track #lastVisible for virtual window end."""
+        assert "#lastVisible" in self.content, (
+            "AcvBody must declare a #lastVisible private field"
+        )
+
+    def test_total_rows_field(self) -> None:
+        """AcvBody must track #totalRows for virtual window calculation."""
+        assert "#totalRows" in self.content, (
+            "AcvBody must declare a #totalRows private field"
+        )
+
+    # -- Core method --
+
+    def test_compute_virtual_window_method(self) -> None:
+        """AcvBody must define a #computeVirtualWindow method."""
+        assert "computeVirtualWindow" in self.content, (
+            "AcvBody must define a #computeVirtualWindow() method that computes "
+            "firstVisible/lastVisible from scrollTop and viewportH"
+        )
+
+    # -- Spacer elements --
+
+    def test_spacer_top_in_template(self) -> None:
+        """AcvBody template must include a top spacer tr."""
+        assert "spacer-top" in self.content, (
+            "AcvBody _render() must include a <tr class='spacer-top'> for space above visible rows"
+        )
+
+    def test_spacer_bottom_in_template(self) -> None:
+        """AcvBody template must include a bottom spacer tr."""
+        assert "spacer-bottom" in self.content, (
+            "AcvBody _render() must include a <tr class='spacer-bottom'> for space below visible rows"
+        )
+
+    def test_spacers_use_colspan(self) -> None:
+        """Spacer rows must use colspan='2' to span both columns."""
+        assert 'colspan="2"' in self.content or "colspan=\"2\"" in self.content, (
+            "Spacer <tr> elements must contain <td colspan='2'> to span label+canvas columns"
+        )
+
+    # -- Visible slice --
+
+    def test_rows_sliced(self) -> None:
+        """_render() must slice the rows array to only include visible rows."""
+        assert ".slice(" in self.content, (
+            "AcvBody _render() must use rows.slice(firstVisible, ...) "
+            "to render only visible rows instead of all rows"
+        )
+
+    def test_data_row_class(self) -> None:
+        """Visible data rows must have a 'data-row' class for measurement."""
+        assert "data-row" in self.content, (
+            "AcvBody data rows must have class='data-row' so #ensureCanvases "
+            "can distinguish them from spacer rows when measuring row height"
+        )
+
+    # -- Scroll-triggered re-render --
+
+    def test_schedule_render_method(self) -> None:
+        """AcvBody must define #scheduleRender for RAF-throttled DOM updates."""
+        assert "scheduleRender" in self.content, (
+            "AcvBody must define a #scheduleRender() method that throttles "
+            "Lit re-renders via requestAnimationFrame during scrolling"
+        )
+
+    def test_render_raf_id_field(self) -> None:
+        """AcvBody must track #renderRafId to prevent duplicate RAF scheduling."""
+        assert "#renderRafId" in self.content, (
+            "AcvBody must declare a #renderRafId field to track the "
+            "requestAnimationFrame handle for throttled re-renders"
+        )
+
+    def test_render_raf_id_cleanup(self) -> None:
+        """disconnectedCallback must cancel #renderRafId."""
+        # The disconnectedCallback already cancels #rafId; it must also cancel #renderRafId
+        assert "renderRafId" in self.content, (
+            "AcvBody disconnectedCallback must cancel #renderRafId "
+            "to prevent orphaned RAF callbacks"
+        )
+
+    def test_scroll_handler_calls_compute(self) -> None:
+        """Scroll handler must call #computeVirtualWindow to check if re-render needed."""
+        assert "computeVirtualWindow" in self.content, (
+            "AcvBody scroll handler must call #computeVirtualWindow() "
+            "to decide whether to re-render the DOM"
+        )
+
+    # -- Row height measurement skips spacers --
+
+    def test_row_measurement_skips_spacers(self) -> None:
+        """#ensureCanvases must measure a data-row, not a spacer row."""
+        import re
+        # Must query for data-row (not just 'tr') to skip spacers
+        assert re.search(r"querySelector\(['\"].*data-row", self.content), (
+            "#ensureCanvases must use querySelector('tr.data-row') or similar "
+            "to measure row height — spacer rows have variable height"
+        )
