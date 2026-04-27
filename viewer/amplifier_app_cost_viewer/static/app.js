@@ -1,10 +1,10 @@
 // =============================================================================
-// Amplifier Cost Viewer — app.js  (v2 — Lit custom elements)
+// Amplifier Cost Viewer — app.js  (v3 — Lit custom elements)
 // =============================================================================
 // Architecture:
-//   <acv-toolbar>   — session selector, zoom controls, cost summary
-//   <acv-tree>      — collapsible session / sub-agent tree (left panel)
-//   <acv-timeline>  — cost heatmap + ruler + canvas timeline (main panel)
+//   <acv-toolbar>   — session selector, cost summary
+//   <acv-body>      — canvas-based span renderer (main panel)
+//   <acv-overview>  — minimap overview strip
 //   <acv-detail>    — span detail drawer (bottom panel)
 //
 // Each component owns its shadow DOM; global `state` is the single source of
@@ -591,783 +591,6 @@ class AcvToolbar extends HTMLElement {
 customElements.define('acv-toolbar', AcvToolbar);
 
 // =============================================================================
-// Section 7: Custom element — AcvTree  (full implementation)
-// Collapsible session / sub-agent tree in the left panel.
-// Dispatches toggle-expand and session-select CustomEvents; init() wires them.
-// =============================================================================
-
-class AcvTree extends HTMLElement {
-  constructor() {
-    super();
-    this._root = this.attachShadow({ mode: 'open' });
-  }
-
-  connectedCallback() {
-    subscribe(() => this.update());
-    this.update();
-    // Tree is the vertical scroll master — push scrollTop to state and notify canvas
-    this.addEventListener('scroll', () => {
-      state.scrollTop = this.scrollTop;
-      const timeline = document.getElementById('timeline');
-      if (timeline) timeline.notify();
-    });
-  }
-
-  update() {
-    if (!state.sessionData) {
-      render(html`
-        <style>${this.#styles()}</style>
-        <div class="panel-placeholder">No session loaded.</div>
-      `, this._root);
-      return;
-    }
-
-    const maxCost = this.#maxCostOf(state.sessionData);
-    const rows = [];
-    this.#flatten(
-      state.sessionData, 0,
-      state.expandedSessions,
-      maxCost,
-      state.activeSessionId,
-      rows
-    );
-
-    render(html`
-      <style>${this.#styles()}</style>
-      <div class="ruler-spacer"></div>
-      ${rows.map(({ node, depth, toggle, isActive, costPct }) => html`
-        <div
-          class=${'tree-row' + (isActive ? ' active' : '')}
-          @click=${() => this.#onRowClick(node.session_id, (node.children?.length ?? 0) > 0)}
-          data-session-id=${node.session_id}
-          style=${'padding-left:' + (depth * 12) + 'px'}
-        >
-          <span class="toggle">${toggle}</span>
-          <span class="session-label" title=${node.session_id}>
-            ${node.name || node.agent_name || node.session_id.slice(-8)}
-          </span>
-          <span class="session-cost">$${(node.total_cost_usd || 0).toFixed(4)}·${_fmtTokens((node.total_input_tokens || 0) + (node.total_output_tokens || 0))}</span>
-          <div class="cost-bar" style=${'width:' + costPct.toFixed(1) + '%'}></div>
-        </div>
-      `)}
-    `, this._root);
-  }
-
-  #styles() {
-    return `
-      :host {
-        display: block;
-        width: var(--tree-width, 220px);
-        background: #161b22;
-        border-right: 1px solid var(--border, #30363d);
-        overflow-y: auto;
-        flex-shrink: 0;
-        box-sizing: border-box;
-        font-family: "SF Mono", Consolas, Monaco, monospace;
-        font-size: 12px;
-        color: var(--text, #e6edf3);
-      }
-      .ruler-spacer { height: ${RULER_H + HEATMAP_H}px; flex-shrink: 0; background: transparent; }
-      .panel-placeholder {
-        padding: 12px 8px;
-        color: var(--text-muted, #8b949e);
-      }
-      .tree-row {
-        display: flex;
-        align-items: center;
-        height: 32px;
-        cursor: pointer;
-        user-select: none;
-        border-left: 2px solid transparent;
-        position: relative;
-        box-sizing: border-box;
-        padding-right: 8px;
-        overflow: hidden;
-      }
-      .tree-row:hover { background: var(--surface-alt, #21262d); }
-      .tree-row.active {
-        border-left-color: #58a6ff;
-        background: var(--surface-alt, #21262d);
-      }
-      .toggle {
-        width: 14px;
-        flex-shrink: 0;
-        text-align: center;
-        font-size: 10px;
-      }
-      .session-label {
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .session-cost {
-        color: var(--text-muted, #8b949e);
-        font-size: 11px;
-        margin-left: 4px;
-        flex-shrink: 0;
-      }
-      .cost-bar {
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        height: 3px;
-        background: #58a6ff;
-        opacity: 0.4;
-        pointer-events: none;
-      }
-    `;
-  }
-
-  #maxCostOf(node) {
-    let max = node.total_cost_usd || 0;
-    for (const child of node.children ?? []) {
-      max = Math.max(max, this.#maxCostOf(child));
-    }
-    return max;
-  }
-
-  #flatten(node, depth, expanded, maxCost, activeId, rows) {
-    const sid = node.session_id;
-    const hasChildren = (node.children?.length ?? 0) > 0;
-    const isExpanded = expanded.has(sid);
-    const toggle = hasChildren ? (isExpanded ? '▾' : '▸') : '\u00a0';
-    const isActive = sid === activeId;
-    const cost = node.total_cost_usd || 0;
-    const costPct = maxCost > 0 ? (cost / maxCost) * 100 : 0;
-
-    rows.push({ node, depth, toggle, isActive, costPct });
-
-    if (isExpanded && hasChildren) {
-      for (const child of node.children) {
-        this.#flatten(child, depth + 1, expanded, maxCost, activeId, rows);
-      }
-    }
-  }
-
-  #onRowClick(sid, hasChildren) {
-    if (hasChildren) {
-      this.dispatchEvent(new CustomEvent('toggle-expand', {
-        bubbles: true,
-        composed: true,
-        detail: { id: sid },
-      }));
-    }
-    this.dispatchEvent(new CustomEvent('session-select', {
-      bubbles: true,
-      composed: true,
-      detail: { id: sid },
-    }));
-  }
-}
-
-customElements.define('acv-tree', AcvTree);
-
-// =============================================================================
-// Section 8: Custom element — AcvTimeline  (full implementation)
-// Cost heatmap strip + time ruler + canvas area for spans.
-// =============================================================================
-
-class AcvTimeline extends HTMLElement {
-  // Private fields
-  #canvas  = null;
-  #ctx     = null;
-  #rafId   = null;
-  // Drag-to-pan state
-  #dragStartX = 0;
-  #dragStartScrollLeft = 0;
-  #isDragging = false;
-  #hasDragged = false;
-
-  constructor() {
-    super();
-    this._root = this.attachShadow({ mode: 'open' });
-  }
-
-  connectedCallback() {
-    subscribe(() => this.update());
-    this.update();
-  }
-
-  /** Called externally to push new data; schedules a RAF-debounced redraw. */
-  set data(value) {
-    this.update();
-    this.#scheduleRedraw();
-  }
-
-  /** Trigger a canvas-only redraw (e.g. after a scroll event from the tree). */
-  notify() {
-    this.#scheduleRedraw();
-  }
-
-  /** Render the shadow DOM structure: heatmap, ruler, canvas-wrap, detail panel. */
-  update() {
-    const spans   = state.spans;
-    const ts      = state.timeScale;
-    const scrollL = state.scrollLeft;
-
-    render(html`
-      <style>${this.#styles()}</style>
-      <canvas id="heatmap-canvas"></canvas>
-      <div id="ruler" @wheel=${e => this.#onRulerWheel(e)}></div>
-      <div id="canvas-wrap">
-        <canvas></canvas>
-      </div>
-      <acv-detail
-        id="detail"
-        .data=${state.selectedSpan}
-        @detail-close=${e => this.#onDetailClose(e)}
-      ></acv-detail>
-    `, this._root);
-
-    // After render, populate heatmap and ruler, then schedule canvas draw
-    this.#renderHeatmap(spans, ts, scrollL);
-    this.#renderRuler(spans, ts, scrollL);
-    this.#scheduleRedraw();
-  }
-
-  /** Re-dispatch 'detail-close' so it bubbles out of the timeline. */
-  #onDetailClose(_e) {
-    this.dispatchEvent(new CustomEvent('detail-close', {
-      bubbles:  true,
-      composed: true,
-    }));
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private: canvas management
-  // ---------------------------------------------------------------------------
-
-  /** Find the canvas in shadow DOM, get 2D context, attach click/drag listeners. */
-  #ensureCanvas() {
-    const canvas = this._root.querySelector('canvas');
-    if (!canvas) return false;
-    if (this.#canvas !== canvas) {
-      this.#canvas = canvas;
-      this.#ctx = canvas.getContext('2d');
-      canvas.addEventListener('click', e => this.#onCanvasClick(e));
-
-      // Drag-to-pan: mousedown starts drag
-      canvas.addEventListener('mousedown', e => {
-        if (e.button !== 0) return; // left button only
-        this.#dragStartX = e.clientX;
-        this.#dragStartScrollLeft = state.scrollLeft;
-        this.#isDragging = true;
-        this.#hasDragged = false;
-        canvas.style.cursor = 'grabbing';
-        e.preventDefault();
-      });
-
-      // Drag-to-pan: mousemove updates scrollLeft
-      canvas.addEventListener('mousemove', e => {
-        if (!this.#isDragging) return;
-        const delta = e.clientX - this.#dragStartX;
-        if (Math.abs(delta) > 4) this.#hasDragged = true;
-        if (this.#hasDragged) {
-          state.scrollLeft = Math.max(0, this.#dragStartScrollLeft - delta);
-          this.#draw();
-        }
-      });
-
-      // Drag-to-pan: stop drag on mouseup (suppress click if we dragged)
-      canvas.addEventListener('mouseup', e => {
-        if (this.#hasDragged) e.stopPropagation();
-        this.#isDragging = false;
-        canvas.style.cursor = 'grab';
-      });
-
-      // Drag-to-pan: stop drag on mouseleave to avoid stuck drag state
-      canvas.addEventListener('mouseleave', () => {
-        this.#isDragging = false;
-        canvas.style.cursor = 'grab';
-      });
-
-      // Cmd+scroll (macOS) / Ctrl+scroll (Windows/Linux) zoom on the canvas.
-      // { passive: false } is critical — it allows preventDefault() to suppress
-      // the browser's native zoom/scroll (without it the browser fights our zoom).
-      canvas.addEventListener('wheel', e => {
-        if (!e.ctrlKey && !e.metaKey) return; // only when Ctrl/Cmd held
-        e.preventDefault();
-        e.stopPropagation();
-
-        const factor = e.deltaY > 0 ? 1.3 : (1 / 1.3);
-
-        // Compute cursor position in canvas coordinates for cursor-anchored zoom
-        const rect = canvas.getBoundingClientRect();
-        const cursorX = e.clientX - rect.left; // CSS pixels from left edge
-        const cursorMs = (cursorX + state.scrollLeft) * state.timeScale; // ms at cursor
-
-        const oldScale = state.timeScale;
-        const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldScale * factor));
-        if (newScale === oldScale) return;
-
-        _animateZoom(newScale, cursorMs, cursorX);
-      }, { passive: false });
-
-      // Vertical wheel on canvas: route to tree's scroll container (tree = scroll master)
-      canvas.addEventListener('wheel', e => {
-        if (e.ctrlKey || e.metaKey) return; // zoom handler takes this
-        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-          e.preventDefault();
-          const treeEl = document.getElementById('tree');
-          if (treeEl) {
-            treeEl.scrollTop += e.deltaY;
-            // The tree's 'scroll' event fires and updates state.scrollTop + notifies canvas
-          }
-        }
-      }, { passive: false });
-    }
-    return true;
-  }
-
-  /** Resize canvas to match its CSS size, applying DPR scaling. */
-  #resizeCanvas() {
-    if (!this.#canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const wrap = this._root.querySelector('#canvas-wrap');
-    const w = wrap ? wrap.clientWidth  : this.clientWidth;
-    const h = wrap ? wrap.clientHeight : this.clientHeight;
-    this.#canvas.width  = Math.round(w * dpr);
-    this.#canvas.height = Math.round(h * dpr);
-    this.#canvas.style.width  = w + 'px';
-    this.#canvas.style.height = h + 'px';
-    if (this.#ctx) {
-      this.#ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-  }
-
-  /** Schedule a debounced redraw via requestAnimationFrame. */
-  #scheduleRedraw() {
-    if (this.#rafId) cancelAnimationFrame(this.#rafId);
-    this.#rafId = requestAnimationFrame(() => {
-      this.#rafId = null;
-      if (this.#ensureCanvas()) {
-        this.#resizeCanvas();
-        this.#draw();
-      }
-    });
-  }
-
-  /** Draw canvas content: clear background, render spans or placeholder. */
-  #draw() {
-    if (!this.#ctx || !this.#canvas) return;
-    const ctx     = this.#ctx;
-    const cw      = this.#canvas.width  / (window.devicePixelRatio || 1);
-    const ch      = this.#canvas.height / (window.devicePixelRatio || 1);
-    const ts      = state.timeScale;
-    const scrollL = state.scrollLeft;
-    const scrollTop = state.scrollTop || 0;
-
-    // 1. Resize is already done by #resizeCanvas before #draw is called.
-
-    // 2. clearRect full canvas
-    ctx.clearRect(0, 0, cw, ch);
-
-    // 3. Early return with 'No spans' message if empty
-    if (!state.spans || state.spans.length === 0) {
-      ctx.fillStyle = '#0d1117';
-      ctx.fillRect(0, 0, cw, ch);
-      ctx.fillStyle = '#8b949e';
-      ctx.font = '12px "SF Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('No spans to display.', cw / 2, ch / 2);
-      return;
-    }
-
-    // 4. Build rowMap via _rowIndexMap
-    const rowMap = state.sessionData
-      ? _rowIndexMap(state.sessionData, state.expandedSessions)
-      : new Map();
-
-    // 5. Draw alternating row backgrounds (#0d1117 even, #161b22 odd), clipped to viewport.
-    //    Fill entire canvas with base color first, then paint only the visible rows.
-    ctx.fillStyle = '#0d1117';
-    ctx.fillRect(0, 0, cw, ch);
-
-    for (const [, rowIdx] of rowMap) {
-      const y = rowIdx * ROW_H - scrollTop;
-      if (y + ROW_H < 0 || y > ch) continue; // off-screen — skip
-      ctx.fillStyle = rowIdx % 2 === 0 ? '#0d1117' : '#161b22';
-      ctx.fillRect(0, y, cw, ROW_H);
-    }
-
-    // 6. Draw vertical grid lines matching ruler tick intervals (strokeStyle #21262d)
-    //    Uses the same NICE_INTERVALS adaptive algorithm as #renderRuler.
-    {
-      const visibleMs      = cw * ts;
-      const rawInterval    = visibleMs / 8;
-      const tickIntervalMs = NICE_INTERVALS.find(v => v >= rawInterval)
-        || NICE_INTERVALS[NICE_INTERVALS.length - 1];
-      const scrollLeftMs   = scrollL * ts;
-      const lastTickMs     = scrollLeftMs + visibleMs;
-      const firstTick      = Math.ceil(scrollLeftMs / tickIntervalMs) * tickIntervalMs;
-
-      ctx.beginPath();
-      ctx.strokeStyle = '#21262d';
-      ctx.lineWidth   = 1;
-      for (let ms = firstTick; ms <= lastTickMs + tickIntervalMs; ms += tickIntervalMs) {
-        const px = (ms - scrollLeftMs) / ts;
-        if (px < 0 || px > cw) continue;
-        ctx.moveTo(px, 0);
-        ctx.lineTo(px, ch);
-      }
-      ctx.stroke();
-    }
-
-    // 7. Color-batched span drawing
-    //    Batch spans by color into Map<color, rects[]> for efficient rendering.
-    const batches = new Map(); // Map<color, Array<{x,y,w,h}>>
-
-    for (const span of state.spans) {
-      const rowIdx = rowMap.get(span.session_id);
-      if (rowIdx === undefined) continue; // collapsed / not visible
-
-      const x        = (span.start_ms || 0) / ts - scrollL;
-      const duration = Math.max(0, (span.end_ms || 0) - (span.start_ms || 0));
-      const w        = Math.max(2, duration / ts); // minimum 2px width
-
-      // Visibility culling: skip off-screen spans (horizontal)
-      if (x + w < -10 || x > cw + 10) continue;
-
-      const y     = rowIdx * ROW_H - scrollTop + (ROW_H - SPAN_H) / 2;
-
-      // Visibility culling: skip off-screen spans (vertical)
-      if (y + SPAN_H < -10 || y > ch + 10) continue;
-
-      const color = span.color || '#64748B'; // fallback color
-
-      let rects = batches.get(color);
-      if (!rects) { rects = []; batches.set(color, rects); }
-      rects.push({ x, y, w, h: SPAN_H });
-    }
-
-    // Draw each color batch: beginPath, rect each, fill()
-    for (const [color, rects] of batches) {
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      for (const r of rects) {
-        ctx.rect(r.x, r.y, r.w, r.h);
-      }
-      ctx.fill();
-    }
-
-    // 8. Text labels on spans wider than 60px
-    ctx.font          = '11px "SF Mono", monospace';
-    ctx.fillStyle     = '#e6edf3';
-    ctx.textAlign     = 'left';
-    ctx.textBaseline  = 'middle';
-
-    for (const span of state.spans) {
-      const rowIdx = rowMap.get(span.session_id);
-      if (rowIdx === undefined) continue;
-
-      const x        = (span.start_ms || 0) / ts - scrollL;
-      const duration = Math.max(0, (span.end_ms || 0) - (span.start_ms || 0));
-      const w        = Math.max(2, duration / ts);
-
-      if (x + w < -10 || x > cw + 10) continue;
-      if (w <= 60) continue; // only label spans wider than 60px
-
-      const y = rowIdx * ROW_H - scrollTop + ROW_H / 2;
-
-      // Build label: model·cost for LLM spans, tool_name for tool spans
-      let label = '';
-      if (span.type === 'llm' || span.model) {
-        const costStr = span.cost_usd != null ? `$${span.cost_usd.toFixed(4)}` : '';
-        label = span.model
-          ? `${span.model}${costStr ? '·' + costStr : ''}`
-          : costStr;
-      } else if (span.tool_name) {
-        label = span.tool_name;
-      } else {
-        label = span.name || '';
-      }
-      if (!label) continue;
-
-      ctx.fillText(label, x + 4, y, w - 8); // maxWidth = w - 8
-    }
-
-    // 9. Orchestrator gap labels: 'idle Xms' in dark spaces > 200px
-    const spansBySession = new Map();
-    for (const span of state.spans) {
-      const sid = span.session_id;
-      if (!spansBySession.has(sid)) spansBySession.set(sid, []);
-      spansBySession.get(sid).push(span);
-    }
-
-    ctx.font      = 'italic 10px "SF Mono", monospace';
-    ctx.fillStyle = '#8b949e';
-    ctx.textAlign = 'center';
-
-    for (const [sid, spans] of spansBySession) {
-      const rowIdx = rowMap.get(sid);
-      if (rowIdx === undefined) continue;
-      const sorted = spans.slice().sort((a, b) => (a.start_ms || 0) - (b.start_ms || 0));
-      for (let i = 0; i < sorted.length - 1; i++) {
-        const gapStartMs  = sorted[i].end_ms || 0;
-        const gapEndMs    = sorted[i + 1].start_ms || 0;
-        const gapDuration = gapEndMs - gapStartMs;
-        if (gapDuration <= 0) continue;
-        const gapX1 = gapStartMs / ts - scrollL;
-        const gapX2 = gapEndMs   / ts - scrollL;
-        const gapW  = gapX2 - gapX1;
-        if (gapW <= 200) continue;      // only label gaps > 200px
-        if (gapX2 < 0 || gapX1 > cw) continue;
-        const midX = (gapX1 + gapX2) / 2;
-        const y    = rowIdx * ROW_H - scrollTop + ROW_H / 2;
-        ctx.fillText(`idle ${_formatMs(gapDuration)}`, midX, y);
-      }
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private: heatmap rendering
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Bucketize spans by cost into 4px-wide columns and render as a
-   * canvas-based filled area chart with a purple gradient fill and
-   * amber peak marker.
-   */
-  #renderHeatmap(spans, ts, scrollL) {
-    const canvas = this._root.querySelector('#heatmap-canvas');
-    if (!canvas) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = canvas.clientWidth || 800;
-    const cssH = canvas.clientHeight || HEATMAP_H;
-    canvas.width  = Math.round(cssW * dpr);
-    canvas.height = Math.round(cssH * dpr);
-
-    const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, cssW, cssH);
-
-    if (!spans || spans.length === 0) return;
-
-    const colW    = 4; // px per bucket
-    const numCols = Math.ceil(cssW / colW);
-    const buckets = new Float64Array(numCols);
-
-    for (const span of spans) {
-      const cost = span.cost_usd || 0;
-      if (cost <= 0) continue;
-      const midMs = ((span.start_ms || 0) + (span.end_ms || 0)) / 2;
-      const px    = (midMs - scrollL) / ts;
-      const col   = Math.floor(px / colW);
-      if (col >= 0 && col < numCols) {
-        buckets[col] += cost;
-      }
-    }
-
-    // Find peak bucket for normalisation
-    let peak    = 0;
-    let peakIdx = -1;
-    for (let i = 0; i < numCols; i++) {
-      if (buckets[i] > peak) { peak = buckets[i]; peakIdx = i; }
-    }
-    if (peak === 0) return;
-
-    // Build area path (filled area chart)
-    ctx.beginPath();
-    ctx.moveTo(0, cssH);
-    for (let i = 0; i < numCols; i++) {
-      const norm = buckets[i] > 0 ? Math.max(0.08, buckets[i] / peak) : 0;
-      const y    = cssH - norm * cssH;
-      ctx.lineTo(i * colW, y);
-      ctx.lineTo((i + 1) * colW, y);
-    }
-    ctx.lineTo(cssW, cssH);
-    ctx.closePath();
-
-    // Purple gradient fill: Anthropic purple rgba(123, 47, 190, ...)
-    const grad = ctx.createLinearGradient(0, 0, 0, cssH);
-    grad.addColorStop(0, 'rgba(123, 47, 190, 0.8)');
-    grad.addColorStop(1, 'rgba(123, 47, 190, 0.1)');
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    // Amber peak marker dot
-    if (peakIdx >= 0) {
-      const peakX = peakIdx * colW + colW / 2;
-      const norm  = Math.max(0.08, buckets[peakIdx] / peak);
-      const peakY = cssH - norm * cssH;
-      ctx.beginPath();
-      ctx.arc(peakX, peakY, 3, 0, Math.PI * 2);
-      ctx.fillStyle = '#f59e0b';
-      ctx.fill();
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private: ruler rendering
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Adaptive tick rendering — Chrome DevTools style.
-   * Selects a tick interval from NICE_INTERVALS so ~8 ticks fit the visible
-   * window, then draws only ticks in the visible range (scrollL…scrollL+W).
-   */
-  #renderRuler(spans, ts, scrollL) {
-    const el = this._root.querySelector('#ruler');
-    if (!el) return;
-
-    const containerW = el.clientWidth || 800;
-
-    // Visible time window in ms
-    const visibleMs = containerW * ts;
-
-    // Target ~8 ticks across the view; snap to nearest nice interval
-    const rawInterval = visibleMs / 8;
-    const tickIntervalMs = NICE_INTERVALS.find(v => v >= rawInterval)
-      || NICE_INTERVALS[NICE_INTERVALS.length - 1];
-
-    // Convert scroll offset to ms
-    const scrollLeftMs = scrollL * ts;
-    const lastTickMs   = scrollLeftMs + visibleMs;
-
-    // First tick at or after scrollLeftMs
-    const firstTick = Math.ceil(scrollLeftMs / tickIntervalMs) * tickIntervalMs;
-
-    let html = '';
-    for (let ms = firstTick; ms <= lastTickMs + tickIntervalMs; ms += tickIntervalMs) {
-      const px = (ms - scrollLeftMs) / ts;
-      if (px < 0 || px > containerW) continue;
-      html += `<div class="tick" style="left:${px.toFixed(1)}px;">` +
-        `<div class="tick-line"></div>` +
-        `<div class="tick-label">${_formatRulerLabel(ms, tickIntervalMs)}</div>` +
-        `</div>`;
-    }
-    el.innerHTML = html;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private: event handlers
-  // ---------------------------------------------------------------------------
-
-  /** Wheel on ruler: cursor-centred zoom. */
-  #onRulerWheel(e) {
-    e.preventDefault();
-
-    const el  = this._root.querySelector('#ruler');
-    const rect = el ? el.getBoundingClientRect() : { left: 0 };
-    const cursorPx = e.clientX - rect.left;
-
-    // Time at cursor before zoom
-    const msAtCursor = (cursorPx + state.scrollLeft) * state.timeScale;
-
-    // Zoom factor
-    const factor = e.deltaY > 0 ? 1.15 : 0.87;
-    const targetScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, state.timeScale * factor));
-
-    _animateZoom(targetScale, msAtCursor, cursorPx);
-  }
-
-  /** Canvas click: hit-test spans, dispatch 'span-select' CustomEvent. */
-  #onCanvasClick(e) {
-    if (!this.#canvas) return;
-    const rect   = this.#canvas.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
-
-    const ts        = state.timeScale;
-    const scrollL   = state.scrollLeft;
-    const scrollTop = state.scrollTop || 0;
-    const rowMap  = state.sessionData
-      ? _rowIndexMap(state.sessionData, state.expandedSessions)
-      : new Map();
-
-    for (const span of state.spans) {
-      const rowIdx = rowMap.get(span.session_id);
-      if (rowIdx === undefined) continue;
-
-      const x        = (span.start_ms || 0) / ts - scrollL;
-      const duration = Math.max(0, (span.end_ms || 0) - (span.start_ms || 0));
-      const w        = Math.max(2, duration / ts);
-      const y        = rowIdx * ROW_H - scrollTop + (ROW_H - SPAN_H) / 2;
-
-      if (clickX >= x && clickX <= x + w && clickY >= y && clickY <= y + SPAN_H) {
-        this.dispatchEvent(new CustomEvent('span-select', {
-          bubbles:  true,
-          composed: true,
-          detail:   { span },
-        }));
-        return;
-      }
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private: styles
-  // ---------------------------------------------------------------------------
-
-  #styles() {
-    return `
-      :host {
-        display: flex;
-        flex-direction: column;
-        flex: 1;
-        overflow: hidden;
-        min-width: 0;
-        position: relative;
-        background: var(--bg, #0d1117);
-        box-sizing: border-box;
-        font-family: "SF Mono", Consolas, Monaco, monospace;
-        font-size: 12px;
-      }
-      #heatmap-canvas {
-        display: block;
-        width: 100%;
-        height: 20px;
-        flex-shrink: 0;
-        background: var(--bg, #0d1117);
-      }
-      #ruler {
-        height: 28px;
-        position: relative;
-        overflow: hidden;
-        flex-shrink: 0;
-        background: var(--surface, #161b22);
-        border-bottom: 1px solid var(--border, #30363d);
-        cursor: ew-resize;
-      }
-      .tick {
-        position: absolute;
-        top: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        transform: translateX(-50%);
-      }
-      .tick-line {
-        width: 1px;
-        height: 8px;
-        background: var(--border, #30363d);
-      }
-      .tick-label {
-        font-size: 10px;
-        color: var(--text-muted, #8b949e);
-        white-space: nowrap;
-        text-align: center;
-        margin-top: 2px;
-      }
-      #canvas-wrap {
-        flex: 1;
-        position: relative;
-        overflow: hidden;
-      }
-      canvas {
-        display: block;
-        cursor: grab;
-      }
-    `;
-  }
-}
-
-customElements.define('acv-timeline', AcvTimeline);
-
-// =============================================================================
 // Section 9: Custom element — AcvOverview  (placeholder)
 // Thin 60px strip above the detail drawer. Phase 2 will add canvas rendering.
 // =============================================================================
@@ -1422,20 +645,44 @@ customElements.define('acv-overview', AcvOverview);
 // =============================================================================
 
 class AcvBody extends HTMLElement {
+  // ── Private canvas state ────────────────────────────────────────────────
+  #canvas = null;
+  #ctx = null;
+  #rulerCanvas = null;
+  #rulerCtx = null;
+  #rafId = null;
+  #dragStartX = 0;
+  #dragStartViewportStart = 0;
+  #dragStartViewportEnd = 0;
+  #isDragging = false;
+  #hasDragged = false;
+
   constructor() {
     super();
     this._root = this.attachShadow({ mode: 'open' });
   }
 
   connectedCallback() {
-    subscribe(() => this._render());
+    subscribe(() => this.notify());
     this._render();
-    // Scroll wiring is handled inside _render() via _scrollWired guard
+    requestAnimationFrame(() => {
+      this.#ensureCanvases();
+      this.#scheduleRedraw();
+      const grid = this._root.querySelector('.grid');
+      if (grid) {
+        grid.addEventListener('scroll', () => {
+          state.scrollTop = grid.scrollTop;
+          this.#scheduleRedraw();
+        });
+      }
+    });
   }
 
-  /** Called externally to trigger a re-render (e.g. after canvas redraws). */
+  /** Called on every state change to re-render Lit template + canvas. */
   notify() {
     this._render();
+    this.#ensureCanvases();
+    this.#scheduleRedraw();
   }
 
   _render() {
@@ -1482,11 +729,6 @@ class AcvBody extends HTMLElement {
           flex-shrink: 0;
           border-right: 1px solid var(--border, #30363d);
         }
-        .ruler-ticks {
-          flex: 1;
-          position: relative;
-          overflow: hidden;
-        }
         /* Labels column: grid-column 1, grid-row 2 */
         .labels-column {
           grid-column: 1;
@@ -1529,7 +771,7 @@ class AcvBody extends HTMLElement {
           margin-left: 4px;
           flex-shrink: 0;
         }
-        /* Canvas column: grid-column 2, grid-row 2 (Phase 1 placeholder) */
+        /* Canvas column: grid-column 2, grid-row 2 */
         .canvas-column {
           grid-column: 2;
           grid-row: 2;
@@ -1541,13 +783,13 @@ class AcvBody extends HTMLElement {
       <div class="grid">
         <div class="ruler-wrapper">
           <div class="ruler-left-blank"></div>
-          <div class="ruler-ticks"></div>
+          <canvas id="ruler-canvas" style="flex: 1; display: block;"></canvas>
         </div>
         <div class="labels-column">
           ${rows.map(({ node, depth }) => {
             const hasChildren = (node.children?.length ?? 0) > 0;
             const isExpanded = state.expandedSessions.has(node.session_id);
-            const toggle = hasChildren ? (isExpanded ? '\u25be' : '\u25b8') : '\u00a0';
+            const toggle = hasChildren ? (isExpanded ? '▾' : '▸') : '\u00a0';
             const cost = node.total_cost_usd || 0;
             const name = node.name || node.agent_name || node.session_id.slice(-8);
             return html`
@@ -1563,19 +805,306 @@ class AcvBody extends HTMLElement {
             `;
           })}
         </div>
-        <div class="canvas-column"></div>
+        <canvas id="main-canvas" style="grid-column: 2; grid-row: 2; display: block; cursor: grab;"></canvas>
       </div>
       <acv-detail></acv-detail>
     `, this._root);
+  }
 
-    // Wire scroll tracking once (Lit reuses the .grid element; guard prevents double-registration)
-    const grid = this._root.querySelector('.grid');
-    if (grid && !grid._scrollWired) {
-      grid._scrollWired = true;
-      grid.addEventListener('scroll', () => {
-        state.scrollTop = grid.scrollTop;
-      });
+  // ── Canvas lifecycle ──────────────────────────────────────────────────────
+
+  #ensureCanvases() {
+    const mc = this._root.getElementById('main-canvas');
+    const rc = this._root.getElementById('ruler-canvas');
+    if (!mc || !rc) return;
+    if (this.#canvas !== mc) {
+      this.#canvas = mc;
+      this.#ctx = mc.getContext('2d');
+      this.#wireCanvasEvents(mc);
     }
+    if (this.#rulerCanvas !== rc) {
+      this.#rulerCanvas = rc;
+      this.#rulerCtx = rc.getContext('2d');
+      this.#wireRulerEvents(rc);
+    }
+    // Size canvases to match their container
+    const dpr = window.devicePixelRatio || 1;
+    const rows = state.sessionData
+      ? _rowIndexMap(state.sessionData, state.expandedSessions).size
+      : 0;
+    const gridEl = this._root.querySelector('.grid');
+    if (gridEl) {
+      const bodyW = gridEl.clientWidth - 220;
+      const bodyH = Math.max(rows * ROW_H, 32);
+      if (mc.width !== Math.floor(bodyW * dpr)) {
+        mc.width  = Math.floor(bodyW * dpr);
+        mc.height = Math.floor(bodyH * dpr);
+        mc.style.width  = bodyW + 'px';
+        mc.style.height = bodyH + 'px';
+        this.#ctx.scale(dpr, dpr);
+      }
+      const rulerH = 28;
+      if (rc.width !== Math.floor(bodyW * dpr)) {
+        rc.width  = Math.floor(bodyW * dpr);
+        rc.height = Math.floor(rulerH * dpr);
+        rc.style.width  = bodyW + 'px';
+        rc.style.height = rulerH + 'px';
+        this.#rulerCtx.scale(dpr, dpr);
+      }
+    }
+  }
+
+  #scheduleRedraw() {
+    if (this.#rafId) cancelAnimationFrame(this.#rafId);
+    this.#rafId = requestAnimationFrame(() => {
+      this.#rafId = null;
+      this.#draw();
+      this.#drawRuler();
+    });
+  }
+
+  // ── Gantt canvas draw ─────────────────────────────────────────────────────
+
+  #draw() {
+    const ctx    = this.#ctx;
+    const canvas = this.#canvas;
+    if (!ctx || !canvas) return;
+    const W = canvas.width  / (window.devicePixelRatio || 1);
+    const H = canvas.height / (window.devicePixelRatio || 1);
+    ctx.clearRect(0, 0, W, H);
+
+    const rowMap   = state.sessionData
+      ? _rowIndexMap(state.sessionData, state.expandedSessions)
+      : new Map();
+    const scrollTop = state.scrollTop || 0;
+
+    // Loading overlay
+    if (state.loading) {
+      ctx.fillStyle = '#0d1117';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle  = '#8b949e';
+      ctx.font       = '14px monospace';
+      ctx.textAlign  = 'center';
+      ctx.fillText('Loading\u2026', W / 2, H / 2);
+      ctx.textAlign  = 'left';
+      return;
+    }
+
+    // Alternating row backgrounds
+    for (const [, rowIdx] of rowMap) {
+      const y = rowIdx * ROW_H - scrollTop;
+      if (y + ROW_H < 0 || y > H) continue;
+      ctx.fillStyle = rowIdx % 2 === 0 ? '#0d1117' : '#161b22';
+      ctx.fillRect(0, y, W, ROW_H);
+    }
+
+    if (!state.spans || state.spans.length === 0) return;
+
+    // Vertical grid lines (same tick intervals as ruler)
+    if (state.viewportEndMs > state.viewportStartMs) {
+      const visMs       = state.viewportEndMs - state.viewportStartMs;
+      const rawInterval = visMs / 8;
+      const tickInt     = NICE_INTERVALS.find(v => v >= rawInterval)
+                          || NICE_INTERVALS[NICE_INTERVALS.length - 1];
+      const firstTick   = Math.ceil(state.viewportStartMs / tickInt) * tickInt;
+      ctx.strokeStyle   = '#21262d';
+      ctx.lineWidth     = 1;
+      for (let t = firstTick; t <= state.viewportEndMs + tickInt; t += tickInt) {
+        const x = timeToPixel(t, W);
+        if (x < 0 || x > W) continue;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+      }
+    }
+
+    // Color-batched span rectangles
+    const batches = new Map();
+    for (const span of state.spans) {
+      const rowIdx = rowMap.get(span.session_id);
+      if (rowIdx === undefined) continue;
+      const y = rowIdx * ROW_H - scrollTop + (ROW_H - SPAN_H) / 2;
+      if (y + SPAN_H < -4 || y > H + 4) continue;
+      const x = timeToPixel(span.start_ms || 0, W);
+      const w = Math.max(2, timeToPixel(span.end_ms || 0, W) - x);
+      if (x + w < -10 || x > W + 4) continue;
+      const color = span.color || '#64748B';
+      if (!batches.has(color)) batches.set(color, []);
+      batches.get(color).push({ x, y, w, h: SPAN_H });
+    }
+
+    for (const [color, rects] of batches) {
+      ctx.beginPath();
+      for (const r of rects) ctx.rect(r.x, r.y, r.w, r.h);
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+
+    // Text labels on wide spans (>60 px)
+    ctx.font         = '10px monospace';
+    ctx.textBaseline = 'middle';
+    for (const span of state.spans) {
+      const rowIdx = rowMap.get(span.session_id);
+      if (rowIdx === undefined) continue;
+      const x = timeToPixel(span.start_ms || 0, W);
+      const w = timeToPixel(span.end_ms || 0, W) - x;
+      if (w < 60) continue;
+      const y = rowIdx * ROW_H - scrollTop + ROW_H / 2;
+      if (y < -4 || y > H + 4) continue;
+      const label = span.type === 'llm'
+        ? `${span.model || ''} \u00b7 $${(span.cost_usd || 0).toFixed(3)}`
+        : (span.tool_name || span.type || '');
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.save();
+      ctx.rect(x + 2, y - SPAN_H / 2, w - 4, SPAN_H);
+      ctx.clip();
+      ctx.fillText(label, x + 4, y, w - 8);
+      ctx.restore();
+    }
+  }
+
+  // ── Ruler canvas draw ─────────────────────────────────────────────────────
+
+  #drawRuler() {
+    const ctx    = this.#rulerCtx;
+    const canvas = this.#rulerCanvas;
+    if (!ctx || !canvas) return;
+    const W = canvas.width / (window.devicePixelRatio || 1);
+    const H = 28;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#161b22';
+    ctx.fillRect(0, 0, W, H);
+
+    if (state.viewportEndMs <= state.viewportStartMs) return;
+    const visibleMs   = state.viewportEndMs - state.viewportStartMs;
+    const rawInterval = visibleMs / 8;
+    const tickInterval = NICE_INTERVALS.find(v => v >= rawInterval)
+                         || NICE_INTERVALS[NICE_INTERVALS.length - 1];
+
+    const firstTick = Math.ceil(state.viewportStartMs / tickInterval) * tickInterval;
+    ctx.font      = '10px monospace';
+    ctx.textAlign = 'center';
+    for (let t = firstTick; t <= state.viewportEndMs + tickInterval; t += tickInterval) {
+      const x = timeToPixel(t, W);
+      if (x < 0 || x > W) continue;
+      ctx.strokeStyle = '#30363d';
+      ctx.lineWidth   = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, 8);
+      ctx.stroke();
+      ctx.fillStyle = '#8b949e';
+      ctx.fillText(_formatRulerLabel(t, tickInterval), x, 22);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  // ── Canvas event handlers ─────────────────────────────────────────────────
+
+  #wireCanvasEvents(canvas) {
+    // Drag to pan viewport
+    canvas.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      this.#dragStartX              = e.clientX;
+      this.#dragStartViewportStart  = state.viewportStartMs;
+      this.#dragStartViewportEnd    = state.viewportEndMs;
+      this.#isDragging              = true;
+      this.#hasDragged              = false;
+      canvas.style.cursor           = 'grabbing';
+      e.preventDefault();
+    });
+
+    canvas.addEventListener('mousemove', e => {
+      if (!this.#isDragging) return;
+      const delta = e.clientX - this.#dragStartX;
+      if (Math.abs(delta) > 4) this.#hasDragged = true;
+      if (this.#hasDragged) {
+        const W      = canvas.width / (window.devicePixelRatio || 1);
+        const msDelta = (delta / W) * (this.#dragStartViewportEnd - this.#dragStartViewportStart);
+        setViewport(
+          this.#dragStartViewportStart - msDelta,
+          this.#dragStartViewportEnd   - msDelta,
+          false,
+        );
+      }
+    });
+
+    const stopDrag = () => {
+      this.#isDragging    = false;
+      canvas.style.cursor = 'grab';
+    };
+    canvas.addEventListener('mouseup',    e => { if (this.#hasDragged) e.stopPropagation(); stopDrag(); });
+    canvas.addEventListener('mouseleave', stopDrag);
+
+    // Cmd/Ctrl + scroll → zoom; plain scroll → route to grid
+    canvas.addEventListener('wheel', e => {
+      if (!e.ctrlKey && !e.metaKey) {
+        // Vertical scroll: forward to the scrollable grid container
+        const grid = this._root.querySelector('.grid');
+        if (grid) grid.scrollTop += e.deltaY;
+        e.preventDefault();
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      const factor    = e.deltaY > 0 ? 1.3 : (1 / 1.3);
+      const W         = canvas.width / (window.devicePixelRatio || 1);
+      const rect      = canvas.getBoundingClientRect();
+      const cursorX   = e.clientX - rect.left;
+      const cursorMs  = pixelToTime(cursorX, W);
+      const visibleMs = state.viewportEndMs - state.viewportStartMs;
+      const newVisible = Math.max(100, visibleMs * factor);
+      const ratio     = (cursorMs - state.viewportStartMs) / visibleMs;
+      setViewport(
+        cursorMs - ratio * newVisible,
+        cursorMs + (1 - ratio) * newVisible,
+      );
+    }, { passive: false });
+
+    // Click to select a span
+    canvas.addEventListener('click', e => {
+      if (this.#hasDragged) return;
+      const W        = canvas.width / (window.devicePixelRatio || 1);
+      const rect     = canvas.getBoundingClientRect();
+      const clickX   = e.clientX - rect.left;
+      const clickMs  = pixelToTime(clickX, W);
+      const clickY   = e.clientY - rect.top + (state.scrollTop || 0);
+      const rowMap   = state.sessionData
+        ? _rowIndexMap(state.sessionData, state.expandedSessions)
+        : new Map();
+      const clickRow = Math.floor(clickY / ROW_H);
+      let hit = null;
+      for (const span of (state.spans || [])) {
+        const rowIdx = rowMap.get(span.session_id);
+        if (rowIdx !== clickRow) continue;
+        if (clickMs >= (span.start_ms || 0) && clickMs <= (span.end_ms || 0)) {
+          hit = span;
+          break;
+        }
+      }
+      state.selectedSpan = hit;
+      renderAll();
+    });
+  }
+
+  #wireRulerEvents(ruler) {
+    ruler.style.cursor = 'ew-resize';
+    ruler.addEventListener('wheel', e => {
+      e.preventDefault();
+      const factor    = e.deltaY > 0 ? 1.3 : (1 / 1.3);
+      const W         = ruler.width / (window.devicePixelRatio || 1);
+      const rect      = ruler.getBoundingClientRect();
+      const cursorX   = e.clientX - rect.left;
+      const cursorMs  = pixelToTime(cursorX, W);
+      const visibleMs = state.viewportEndMs - state.viewportStartMs;
+      const newVisible = Math.max(100, visibleMs * factor);
+      const ratio     = cursorMs / (state.viewportEndMs - state.viewportStartMs);
+      setViewport(
+        cursorMs - ratio * newVisible,
+        cursorMs + (1 - ratio) * newVisible,
+      );
+    }, { passive: false });
   }
 
   _onLabelClick(sid, hasChildren) {
@@ -1613,7 +1142,7 @@ class AcvDetail extends HTMLElement {
     this.update();
   }
 
-  /** Property setter: called by AcvTimeline when selectedSpan changes. */
+  /** Property setter: triggers re-render when selectedSpan changes. */
   set data(_) {
     this.update();
   }

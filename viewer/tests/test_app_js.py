@@ -4,7 +4,7 @@ Tests verify that app.js:
 - Exists and has >500 chars
 - Imports html/render from the local Lit vendor bundle
 - Declares a const state object with the required properties
-- Defines 4 custom element classes (AcvToolbar, AcvTree, AcvTimeline, AcvDetail)
+- Defines custom element classes (AcvToolbar, AcvBody, AcvOverview, AcvDetail)
   all extending HTMLElement, all using attachShadow, all registered via
   customElements.define
 - Defines async function init()
@@ -144,16 +144,6 @@ class TestAppJsCustomElements:
             "Must define 'class AcvToolbar' extending HTMLElement"
         )
 
-    def test_acv_tree_class_defined(self) -> None:
-        assert "class AcvTree" in self.content, (
-            "Must define 'class AcvTree' extending HTMLElement"
-        )
-
-    def test_acv_timeline_class_defined(self) -> None:
-        assert "class AcvTimeline" in self.content, (
-            "Must define 'class AcvTimeline' extending HTMLElement"
-        )
-
     def test_acv_detail_class_defined(self) -> None:
         assert "class AcvDetail" in self.content, (
             "Must define 'class AcvDetail' extending HTMLElement"
@@ -164,16 +154,6 @@ class TestAppJsCustomElements:
     def test_acv_toolbar_extends_html_element(self) -> None:
         assert "AcvToolbar extends HTMLElement" in self.content, (
             "AcvToolbar must extend HTMLElement"
-        )
-
-    def test_acv_tree_extends_html_element(self) -> None:
-        assert "AcvTree extends HTMLElement" in self.content, (
-            "AcvTree must extend HTMLElement"
-        )
-
-    def test_acv_timeline_extends_html_element(self) -> None:
-        assert "AcvTimeline extends HTMLElement" in self.content, (
-            "AcvTimeline must extend HTMLElement"
         )
 
     def test_acv_detail_extends_html_element(self) -> None:
@@ -201,18 +181,6 @@ class TestAppJsCustomElements:
             "customElements.define('acv-toolbar'" in self.content
             or 'customElements.define("acv-toolbar"' in self.content
         ), "Must register acv-toolbar via customElements.define"
-
-    def test_custom_elements_define_tree(self) -> None:
-        assert (
-            "customElements.define('acv-tree'" in self.content
-            or 'customElements.define("acv-tree"' in self.content
-        ), "Must register acv-tree via customElements.define"
-
-    def test_custom_elements_define_timeline(self) -> None:
-        assert (
-            "customElements.define('acv-timeline'" in self.content
-            or 'customElements.define("acv-timeline"' in self.content
-        ), "Must register acv-timeline via customElements.define"
 
     def test_custom_elements_define_detail(self) -> None:
         assert (
@@ -2256,4 +2224,57 @@ class TestV3CssLayout:
     def test_has_60px(self) -> None:
         assert "60px" in self.content, (
             "style.css must contain 60px height rule for acv-overview"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Task 8 — AcvBody canvas drawing
+# ---------------------------------------------------------------------------
+
+
+class TestAcvBodyCanvas:
+    """Verify AcvBody replaces placeholder divs with real canvas elements."""
+
+    def test_main_canvas_in_template(self, app_js_code: str) -> None:
+        assert "main-canvas" in app_js_code, (
+            "AcvBody template must contain canvas id='main-canvas' "
+            "instead of the .canvas-column placeholder div"
+        )
+
+    def test_ruler_canvas_in_template(self, app_js_code: str) -> None:
+        assert "ruler-canvas" in app_js_code, (
+            "AcvBody template must contain canvas id='ruler-canvas' "
+            "instead of the .ruler-ticks placeholder div"
+        )
+
+    def test_draw_uses_time_to_pixel(self, app_js_code: str) -> None:
+        assert "timeToPixel" in app_js_code, (
+            "AcvBody #draw() must use timeToPixel() for coordinate conversion"
+        )
+        # Must NOT use old timeScale formula
+        assert "ms / timeScale" not in app_js_code, (
+            "AcvBody #draw() must NOT use the old 'ms / timeScale' formula"
+        )
+
+    def test_drag_pan_uses_set_viewport(self, app_js_code: str) -> None:
+        assert "setViewport" in app_js_code, (
+            "AcvBody canvas drag handler must call setViewport() to pan the viewport"
+        )
+        assert (
+            "dragStartViewportStart" in app_js_code or "dragStart" in app_js_code
+        ), (
+            "AcvBody mousedown handler must store drag start position "
+            "(dragStartViewportStart or similar)"
+        )
+
+    def test_ctrl_scroll_zoom_on_canvas(self, app_js_code: str) -> None:
+        assert "ctrlKey" in app_js_code, (
+            "AcvBody canvas wheel handler must check e.ctrlKey for Ctrl+scroll zoom"
+        )
+        assert "metaKey" in app_js_code, (
+            "AcvBody canvas wheel handler must check e.metaKey for Cmd+scroll zoom (macOS)"
+        )
+        assert "passive: false" in app_js_code or "passive:false" in app_js_code, (
+            "AcvBody canvas wheel listener must use { passive: false } "
+            "to allow preventDefault()"
         )
