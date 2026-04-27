@@ -925,6 +925,10 @@ class AcvBody extends HTMLElement {
       cancelAnimationFrame(this.#rafId);
       this.#rafId = null;
     }
+    if (this.#renderRafId) {
+      cancelAnimationFrame(this.#renderRafId);
+      this.#renderRafId = null;
+    }
   }
 
   /** Called on every state change to re-render Lit template + canvas. */
