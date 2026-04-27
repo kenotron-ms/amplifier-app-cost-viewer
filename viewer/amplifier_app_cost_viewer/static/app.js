@@ -635,7 +635,7 @@ class AcvToolbar extends HTMLElement {
           <option
             value=${s.session_id}
             ?selected=${s.session_id === state.activeSessionId}
-          >${s.session_id.slice(-8)}${s.name ? ` · ${s.name}` : ''} — ${_formatDate(s.start_ts)} — $${(s.total_cost_usd || 0).toFixed(4)} — ${_fmtTokens((s.total_input_tokens || 0) + (s.total_output_tokens || 0))} tok</option>
+          >${(() => { const isLive = !s.end_ts; const liveIndicator = isLive ? ' ●' : ''; return `${s.session_id.slice(-8)}${s.name ? ` · ${s.name}` : ''}${liveIndicator} — ${_formatDate(s.start_ts)} — $${(s.total_cost_usd || 0).toFixed(4)} — ${_fmtTokens((s.total_input_tokens || 0) + (s.total_output_tokens || 0))} tok`; })()}</option>
         `)}
         ${state.hasMore ? html`<option value="__load_more__">Load more…</option>` : ''}
       </select>
@@ -1105,6 +1105,12 @@ class AcvBody extends HTMLElement {
           text-overflow: ellipsis;
           white-space: nowrap;
         }
+        .live-dot {
+          color: #3fb950;
+          font-size: 8px;
+          margin-left: 4px;
+          vertical-align: middle;
+        }
         .td-label .label-cost {
           float: right;
           color: #3fb950;
@@ -1143,6 +1149,7 @@ class AcvBody extends HTMLElement {
               const toggle = hasChildren ? (isExpanded ? '▾' : '▸') : '\u00a0';
               const cost = node.total_cost_usd || 0;
               const name = node.name || node.agent_name || node.session_id.slice(-8);
+              const isLive = !node.end_ts;
               const bg = absIdx % 2 === 0 ? '#0d1117' : '#161b22';
               const indent = 8 + depth * 14;
               return html`
@@ -1152,7 +1159,7 @@ class AcvBody extends HTMLElement {
                     style="padding-left: ${indent}px; background: ${bg};"
                     title=${node.session_id}
                     @click=${() => this._onLabelClick(node.session_id, hasChildren)}
-                  ><span class="label-cost">$${cost.toFixed(4)}</span><span class="label-toggle">${toggle}</span><span class="label-name">${name}</span></td>
+                  ><span class="label-cost">$${cost.toFixed(4)}</span><span class="label-toggle">${toggle}</span><span class="label-name">${name}</span>${isLive ? html`<span class="live-dot" title="Session in progress">●</span>` : ''}</td>
                   <td class="td-canvas" style="background: ${bg};"></td>
                 </tr>`;
             })}

@@ -42,6 +42,13 @@ _roots_lock = threading.Lock()  # prevents concurrent tree builds (prewarm + req
 app = FastAPI(title="Amplifier Cost Viewer", version="0.1.0")
 
 
+def _iter_nodes(root: SessionNode):
+    """Yield every node in the session tree rooted at *root* (DFS pre-order)."""
+    yield root
+    for child in root.children:
+        yield from _iter_nodes(child)
+
+
 @app.on_event("startup")
 async def _prewarm_cache() -> None:
     """Build the session cache in the background at startup.
@@ -52,6 +59,34 @@ async def _prewarm_cache() -> None:
     import asyncio
 
     asyncio.create_task(asyncio.to_thread(_get_roots))
+
+
+@app.on_event("startup")
+async def _auto_refresh_live_sessions() -> None:
+    """Periodically invalidate the roots cache while any session is still live.
+
+    Live sessions gain new child summaries as sub-agents complete. Without
+    periodic refresh, the viewer shows stale token/cost counts until the user
+    manually hits refresh.
+    """
+    import asyncio
+
+    async def _refresh_loop() -> None:
+        while True:
+            await asyncio.sleep(60)
+            global _roots_cache, _loaded_cache
+            # Only refresh if there are live sessions (no end_ts)
+            if _roots_cache is not None:
+                has_live = any(
+                    not node.end_ts
+                    for root in _roots_cache
+                    for node in _iter_nodes(root)
+                )
+                if has_live:
+                    _roots_cache = None
+                    _loaded_cache = {}
+
+    asyncio.create_task(_refresh_loop())
 
 
 # Conditionally mount static files when the directory exists

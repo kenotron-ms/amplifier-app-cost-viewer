@@ -159,7 +159,15 @@ def _read_metadata_partial(metadata_path: Path) -> dict:
             import re
 
             result: dict = {}
-            for key in ("session_id", "parent_id", "created", "name", "project_slug"):
+            for key in (
+                "session_id",
+                "parent_id",
+                "created",
+                "name",
+                "project_slug",
+                "end_ts",
+                "ended_at",
+            ):
                 m = re.search(
                     r'"' + key + r'"\s*:\s*("(?:[^"\\]|\\.)*"|null)',
                     chunk,
@@ -439,6 +447,7 @@ def discover_sessions(amplifier_home: Path) -> dict[str, SessionNode]:
                 )
                 created = metadata.get("created", "")
                 name = metadata.get("name")  # may be None
+                end_ts = metadata.get("end_ts") or metadata.get("ended_at")
 
                 # Duration and cost are 0.0 until spans are loaded lazily
                 node = SessionNode(
@@ -446,7 +455,7 @@ def discover_sessions(amplifier_home: Path) -> dict[str, SessionNode]:
                     project_slug=project_slug,
                     parent_id=parent_id,
                     start_ts=created,
-                    end_ts=None,
+                    end_ts=end_ts,
                     duration_ms=0,
                     cost_usd=0.0,
                     total_cost_usd=0.0,
