@@ -328,6 +328,18 @@ function _extractContent(value) {
     const userMsgs = value.filter(m => m && m.role === 'user');
     const last = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1] : value[value.length - 1];
     if (!last) return '\u2014';
+    // If this is a content-block array (not a messages array), extract all text blocks
+    if (last.type != null && last.role == null) {
+      // Array of content blocks like [{type:'text',text:'...'},{type:'tool_use',...}]
+      const parts = value.map(block => {
+        if (block.type === 'text') return block.text;
+        if (block.type === 'tool_use') return `[called: ${block.name}]`;
+        if (block.type === 'tool_result') return _extractContent(block.content);
+        if (block.type === 'image') return '[image]';
+        return '';
+      }).filter(Boolean);
+      return parts.join('\n') || '\u2014';
+    }
     return _extractContent(last.content != null ? last.content : last);
   }
   if (typeof value === 'object') {
@@ -335,13 +347,23 @@ function _extractContent(value) {
       const parts = value.content.map(block => {
         if (block.type === 'text') return block.text;
         if (block.type === 'tool_use') return `[called: ${block.name}]`;
+        if (block.type === 'tool_result') return _extractContent(block.content);
+        if (block.type === 'image') return '[image]';
         return '';
       }).filter(Boolean);
       return parts.join('\n') || '\u2014';
     }
     if (value.content != null) return _extractContent(value.content);
-    if (value.text != null) return value.text;
+    if (value.text   != null) return value.text;
+    // Typed content blocks with no text/content — render type as label
+    if (value.type === 'image')       return '[image]';
+    if (value.type === 'tool_result') return _extractContent(value.content ?? '\u2014');
+    if (value.type === 'tool_use')    return `[called: ${value.name || value.type}]`;
+    // Last resort: compact JSON — at least shows structure, never "[object Object]"
+    try { return JSON.stringify(value, null, 2).slice(0, 800); }
+    catch { return '\u2014'; }
   }
+  // Primitive (number, boolean, etc.)
   return String(value);
 }
 

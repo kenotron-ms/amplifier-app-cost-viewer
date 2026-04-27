@@ -2258,3 +2258,47 @@ class TestVirtualScroll:
             "disconnectedCallback must call cancelAnimationFrame(this.#renderRafId) "
             "to cancel any pending throttled re-render when the element is removed"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: _extractContent — never produces "[object Object]"
+# ---------------------------------------------------------------------------
+
+
+class TestExtractContentNoObjectObject:
+    """Verify _extractContent handles all object shapes safely (never [object Object])."""
+
+    def setup_method(self) -> None:
+        content = APP_JS.read_text()
+        # Isolate just the _extractContent function body
+        self.extract_section = (
+            content.split("function _extractContent")[1].split("function _renderToolInput")[0]
+        )
+
+    def test_no_bare_string_value_fallthrough(self) -> None:
+        """_extractContent must not fall through to bare String(value) without JSON.stringify safety.
+
+        The old code had:  return String(value);  as the last resort, which produces
+        '[object Object]' for plain objects.  The fix adds JSON.stringify before that.
+        """
+        section = self.extract_section
+        has_bare_string = "return String(value);" in section
+        has_json_stringify = "JSON.stringify" in section
+        assert (not has_bare_string) or has_json_stringify, (
+            "_extractContent must add JSON.stringify fallback before String(value) "
+            "to avoid '[object Object]' for plain objects"
+        )
+
+    def test_handles_image_type_block(self) -> None:
+        """_extractContent must return '[image]' for {type:'image',...} content blocks."""
+        section = self.extract_section
+        assert "'[image]'" in section or '"[image]"' in section, (
+            "_extractContent must handle image content blocks with a '[image]' label"
+        )
+
+    def test_fallback_to_json_stringify_in_section(self) -> None:
+        """_extractContent must use JSON.stringify as a last-resort for unknown objects."""
+        assert "JSON.stringify" in self.extract_section, (
+            "_extractContent must use JSON.stringify as fallback for unknown object shapes "
+            "so that arbitrary objects display useful information instead of '[object Object]'"
+        )
