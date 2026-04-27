@@ -1405,7 +1405,53 @@ class AcvTimeline extends HTMLElement {
 customElements.define('acv-timeline', AcvTimeline);
 
 // =============================================================================
-// Section 9: Custom element — AcvDetail  (full implementation)
+// Section 9: Custom element — AcvOverview  (placeholder)
+// Thin 60px strip above the detail drawer. Phase 2 will add canvas rendering.
+// =============================================================================
+
+class AcvOverview extends HTMLElement {
+  constructor() {
+    super();
+    this._root = this.attachShadow({ mode: 'open' });
+  }
+
+  connectedCallback() {
+    subscribe(() => this._render());
+    this._render();
+  }
+
+  _render() {
+    render(html`
+      <style>
+        :host {
+          display: block;
+          width: 100%;
+          height: 60px;
+          background: var(--surface, #161b22);
+          border-bottom: 1px solid var(--border, #30363d);
+          box-sizing: border-box;
+        }
+        .placeholder {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: 100%;
+          font-family: monospace;
+          font-size: 11px;
+          color: var(--muted, #8b949e);
+        }
+      </style>
+      <div class="placeholder">
+        ${state.sessionData ? 'overview — Phase 2' : 'overview — no session'}
+      </div>
+    `, this._root);
+  }
+}
+
+customElements.define('acv-overview', AcvOverview);
+
+// =============================================================================
+// Section 10: Custom element — AcvDetail  (full implementation)
 // Detail drawer shown at the bottom when a span is selected.
 // Shadow DOM component with timing, token, cost rows and I/O blocks.
 // =============================================================================

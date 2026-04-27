@@ -1987,3 +1987,35 @@ class TestV3VisibleRowsWithDepth:
             "app.js must define 'function _visibleRowsWithDepth(node, expanded)' "
             "that returns {node, depth} objects for label indentation"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: AcvOverview placeholder element
+# ---------------------------------------------------------------------------
+
+
+class TestV3AcvOverview:
+    """Verify AcvOverview placeholder element is defined and registered."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_acv_overview_class_defined(self) -> None:
+        """AcvOverview class must be defined extending HTMLElement."""
+        assert "class AcvOverview" in self.content, (
+            "app.js must define 'class AcvOverview' extending HTMLElement"
+        )
+
+    def test_acv_overview_custom_element_registered(self) -> None:
+        """AcvOverview must be registered as 'acv-overview' custom element."""
+        assert (
+            "customElements.define('acv-overview'" in self.content
+            or 'customElements.define("acv-overview"' in self.content
+        ), "Must register acv-overview via customElements.define"
+
+    def test_attach_shadow_count_gte_5(self) -> None:
+        """With AcvOverview, attachShadow must appear at least 5 times."""
+        count = self.content.count("attachShadow")
+        assert count >= 5, (
+            f"All 5 custom element classes must call attachShadow, found {count} calls"
+        )
