@@ -2194,7 +2194,7 @@ class TestVirtualScroll:
 
     def test_rows_sliced(self) -> None:
         """_render() must slice the rows array to only include visible rows."""
-        assert ".slice(" in self.content, (
+        assert "rows.slice(" in self.content, (
             "AcvBody _render() must use rows.slice(firstVisible, ...) "
             "to render only visible rows instead of all rows"
         )
@@ -2246,4 +2246,15 @@ class TestVirtualScroll:
         assert re.search(r"querySelector\(['\"].*data-row", self.content), (
             "#ensureCanvases must use querySelector('tr.data-row') or similar "
             "to measure row height — spacer rows have variable height"
+        )
+
+    # -- RAF cleanup for render throttle --
+
+    def test_cancel_render_raf_on_disconnect(self) -> None:
+        """disconnectedCallback must call cancelAnimationFrame with #renderRafId."""
+        import re
+        # Must explicitly cancel the render RAF handle, not just the canvas RAF
+        assert re.search(r"cancelAnimationFrame\s*\(\s*this\.#renderRafId", self.content), (
+            "disconnectedCallback must call cancelAnimationFrame(this.#renderRafId) "
+            "to cancel any pending throttled re-render when the element is removed"
         )
