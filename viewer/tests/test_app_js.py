@@ -2050,3 +2050,75 @@ class TestP2SelectionBox:
         assert "strokeRect" in self.content, (
             "#drawSelectionBox must call 'strokeRect' to draw the stroked selection border"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Phase 2 — AcvOverview pointer interactions
+# ---------------------------------------------------------------------------
+
+
+class TestP2OverviewInteractions:
+    """Verify AcvOverview has pointer interaction support (click-to-jump, drag-to-pan, drag-to-resize)."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_wire_overview_events_method(self) -> None:
+        """AcvOverview must define a #wireOverviewEvents method."""
+        assert "wireOverviewEvents" in self.content, (
+            "AcvOverview must define a '#wireOverviewEvents' method for pointer interactions"
+        )
+
+    def test_drag_mode_pan(self) -> None:
+        """AcvOverview must support 'pan' drag mode for dragging inside selection."""
+        assert "'pan'" in self.content, (
+            "AcvOverview #wireOverviewEvents must use drag mode 'pan' for dragging inside selection"
+        )
+
+    def test_drag_mode_resize_left(self) -> None:
+        """AcvOverview must support 'resize-left' drag mode for left edge drag."""
+        assert "'resize-left'" in self.content, (
+            "AcvOverview #wireOverviewEvents must use drag mode 'resize-left' for left edge drag"
+        )
+
+    def test_drag_mode_resize_right(self) -> None:
+        """AcvOverview must support 'resize-right' drag mode for right edge drag."""
+        assert "'resize-right'" in self.content, (
+            "AcvOverview #wireOverviewEvents must use drag mode 'resize-right' for right edge drag"
+        )
+
+    def test_overview_calls_set_viewport(self) -> None:
+        """AcvOverview interactions must call setViewport to update the viewport."""
+        assert "setViewport" in self.content, (
+            "AcvOverview #wireOverviewEvents must call setViewport() to update the viewport"
+        )
+
+    def test_cursor_ew_resize(self) -> None:
+        """AcvOverview must set cursor to 'ew-resize' on resize handles."""
+        assert "ew-resize" in self.content, (
+            "AcvOverview #wireOverviewEvents must set cursor style to 'ew-resize' on handle hover"
+        )
+
+    def test_cursor_grab(self) -> None:
+        """AcvOverview must set cursor to 'grab' inside selection."""
+        assert "'grab'" in self.content, (
+            "AcvOverview #wireOverviewEvents must set cursor style to 'grab' inside selection"
+        )
+
+    def test_mousedown_listener(self) -> None:
+        """AcvOverview must register a mousedown event listener."""
+        assert "mousedown" in self.content, (
+            "AcvOverview #wireOverviewEvents must register a 'mousedown' event listener"
+        )
+
+    def test_mousemove_listener(self) -> None:
+        """AcvOverview must register a mousemove event listener."""
+        assert "mousemove" in self.content, (
+            "AcvOverview #wireOverviewEvents must register a 'mousemove' event listener"
+        )
+
+    def test_mouseup_listener(self) -> None:
+        """AcvOverview must register a mouseup event listener."""
+        assert "mouseup" in self.content, (
+            "AcvOverview #wireOverviewEvents must register a 'mouseup' event listener"
+        )

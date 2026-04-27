@@ -708,6 +708,11 @@ class AcvOverview extends HTMLElement {
       this.#ctx    = canvas.getContext('2d');
       this.#canvas = canvas;
     }
+    // Wire pointer events once
+    if (!canvas._v3wired) {
+      this.#wireOverviewEvents(canvas);
+      canvas._v3wired = true;
+    }
   }
 
   #scheduleRedraw() {
@@ -782,6 +787,79 @@ class AcvOverview extends HTMLElement {
     ctx.fillStyle = 'rgba(88, 166, 255, 0.9)';
     ctx.fillRect(x1, 0, 4, H);
     ctx.fillRect(x1 + boxW - 4, 0, 4, H);
+  }
+
+  #wireOverviewEvents(canvas) {
+    const HANDLE_PX = 8;  // hit area pixels from edge (visual handle is 4px)
+
+    canvas.addEventListener('mousedown', e => {
+      const W  = canvas.width / (window.devicePixelRatio || 1);
+      const x  = e.offsetX;
+      const x1 = ovTimeToPixel(state.viewportStartMs, W);
+      const x2 = ovTimeToPixel(state.viewportEndMs, W);
+
+      this.#dragStartX  = x;
+      this.#dragStartMs = { start: state.viewportStartMs, end: state.viewportEndMs };
+
+      if (x < x1 - HANDLE_PX || x > x2 + HANDLE_PX) {
+        // Click outside selection — jump viewport center to click position
+        const clickMs = (x / W) * state.totalDurationMs;
+        const half = (state.viewportEndMs - state.viewportStartMs) / 2;
+        setViewport(clickMs - half, clickMs + half);
+        this.#dragMode = null;
+      } else if (x <= x1 + HANDLE_PX) {
+        this.#dragMode = 'resize-left';
+        canvas.style.cursor = 'ew-resize';
+      } else if (x >= x2 - HANDLE_PX) {
+        this.#dragMode = 'resize-right';
+        canvas.style.cursor = 'ew-resize';
+      } else {
+        this.#dragMode = 'pan';
+        canvas.style.cursor = 'grabbing';
+      }
+      e.preventDefault();
+    });
+
+    canvas.addEventListener('mousemove', e => {
+      const W = canvas.width / (window.devicePixelRatio || 1);
+
+      // Drag handling
+      if (this.#dragMode) {
+        const dx  = e.offsetX - this.#dragStartX;
+        const dms = (dx / W) * state.totalDurationMs;
+
+        if (this.#dragMode === 'pan') {
+          setViewport(this.#dragStartMs.start + dms, this.#dragStartMs.end + dms, false);
+        } else if (this.#dragMode === 'resize-left') {
+          setViewport(this.#dragStartMs.start + dms, this.#dragStartMs.end, false);
+        } else if (this.#dragMode === 'resize-right') {
+          setViewport(this.#dragStartMs.start, this.#dragStartMs.end + dms, false);
+        }
+        return;
+      }
+
+      // Cursor feedback when not dragging
+      const x  = e.offsetX;
+      const x1 = ovTimeToPixel(state.viewportStartMs, W);
+      const x2 = ovTimeToPixel(state.viewportEndMs, W);
+
+      if ((x >= x1 - HANDLE_PX && x <= x1 + HANDLE_PX) ||
+          (x >= x2 - HANDLE_PX && x <= x2 + HANDLE_PX)) {
+        canvas.style.cursor = 'ew-resize';
+      } else if (x > x1 && x < x2) {
+        canvas.style.cursor = 'grab';
+      } else {
+        canvas.style.cursor = 'crosshair';
+      }
+    });
+
+    const stopDrag = () => {
+      if (this.#dragMode) {
+        this.#dragMode = null;
+      }
+    };
+    canvas.addEventListener('mouseup', stopDrag);
+    canvas.addEventListener('mouseleave', stopDrag);
   }
 }
 
