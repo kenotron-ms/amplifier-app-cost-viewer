@@ -2186,7 +2186,7 @@ class TestVirtualScroll:
 
     def test_spacers_use_colspan(self) -> None:
         """Spacer rows must use colspan='2' to span both columns."""
-        assert 'colspan="2"' in self.content or "colspan=\"2\"" in self.content, (
+        assert 'colspan="2"' in self.content, (
             "Spacer <tr> elements must contain <td colspan='2'> to span label+canvas columns"
         )
 
