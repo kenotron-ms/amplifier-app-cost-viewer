@@ -69,12 +69,7 @@ function notify() {
 // Section 3: renderAll — trigger all components to re-render
 // =============================================================================
 
-function renderAll() {
-  notify();
-  // Push loading flag directly to timeline (so #draw() sees it before the RAF fires)
-  const _tl = document.querySelector('acv-timeline');
-  if (_tl) _tl.loading = state.loading;
-}
+function renderAll() { notify(); }
 
 // =============================================================================
 // Section 3b: Coordinate helpers (v3 viewport model)
@@ -1933,7 +1928,7 @@ customElements.define('acv-detail', AcvDetail);
 
 async function loadSession(id) {
   state.loading = true;
-  renderAll(); // immediately show loading state
+  renderAll();
 
   try {
     state.activeSessionId = id;
@@ -1951,11 +1946,9 @@ async function loadSession(id) {
       }
     }
 
-    // Compute initial timeScale to fit timeline in view
-    const maxEndMs = state.spans.reduce((m, s) => Math.max(m, s.end_ms || 0), 1);
-    const viewWidth = document.getElementById('timeline')?.clientWidth || 800;
-    state.timeScale = maxEndMs / Math.max(viewWidth - 80, 400);
-    state.scrollLeft = 0;
+    // Compute total duration and set viewport to show the full session
+    state.totalDurationMs = state.spans.reduce((m, s) => Math.max(m, s.end_ms || 0), 1000);
+    setViewport(0, state.totalDurationMs, false);
   } finally {
     state.loading = false;
     renderAll();

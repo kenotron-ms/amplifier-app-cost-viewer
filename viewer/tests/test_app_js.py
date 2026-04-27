@@ -2176,6 +2176,35 @@ class TestV3HtmlStructure:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Tests: v3 loadSession - totalDurationMs and setViewport
+# ---------------------------------------------------------------------------
+
+
+class TestV3LoadSession:
+    """Verify loadSession computes totalDurationMs and calls setViewport."""
+
+    def setup_method(self) -> None:
+        self.content = APP_JS.read_text()
+
+    def test_load_session_computes_total_duration_ms(self) -> None:
+        """loadSession must assign state.totalDurationMs from spans reduce."""
+        assert "state.totalDurationMs" in self.content, (
+            "loadSession must compute state.totalDurationMs from spans"
+        )
+
+    def test_load_session_calls_set_viewport(self) -> None:
+        """loadSession must call setViewport(0, state.totalDurationMs, false)."""
+        assert "setViewport(0," in self.content, (
+            "loadSession must call setViewport(0, state.totalDurationMs, false)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: v3 CSS layout (style.css)
+# ---------------------------------------------------------------------------
+
+
 class TestV3CssLayout:
     """Verify style.css has acv-overview and acv-body rules with correct sizing."""
 
