@@ -558,14 +558,61 @@ def _parse_all_spans(node: SessionNode, root_start_ms: int) -> None:
         _parse_all_spans(child, root_start_ms)
 
 
+def _read_observability_costs(
+    amplifier_home: Path, session_ids: set[str]
+) -> dict[str, dict]:
+    """Read pre-computed totals from observability JSONL session_summary records.
+
+    Fast: reads only the last line of each file (session_summary is always last).
+    Returns {session_id: {"cost": float, "input_tokens": int, "output_tokens": int}}.
+    Falls back to an empty dict for sessions without an observability file.
+    """
+    obs_dir = amplifier_home / "observability"
+    costs: dict[str, dict] = {}
+    if not obs_dir.exists():
+        return costs
+
+    for jsonl_path in obs_dir.glob("*.jsonl"):
+        # filename IS the session_id (possibly with .jsonl extension stripped)
+        file_sid = jsonl_path.stem
+        if file_sid not in session_ids:
+            continue
+        try:
+            # Read only last non-empty line — session_summary is always last
+            last_line = ""
+            with jsonl_path.open("rb") as f:
+                # Seek to near end and scan back for last newline
+                f.seek(0, 2)  # end
+                size = f.tell()
+                chunk_size = min(4096, size)
+                f.seek(max(0, size - chunk_size))
+                chunk = f.read().decode("utf-8", errors="replace")
+            for line in reversed(chunk.splitlines()):
+                if line.strip():
+                    last_line = line.strip()
+                    break
+            if last_line:
+                record = json.loads(last_line)
+                if record.get("type") == "session_summary":
+                    costs[file_sid] = {
+                        "cost": float(record.get("total_cost_usd", 0.0)),
+                        "input_tokens": int(record.get("total_input_tokens", 0)),
+                        "output_tokens": int(record.get("total_output_tokens", 0)),
+                    }
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+    return costs
+
+
 def build_session_tree(amplifier_home: Path) -> list[SessionNode]:
     """Discover sessions, build tree, and aggregate costs (metadata only).
 
-    Three-stage pipeline (spans loaded lazily on demand, not here):
+    Four-stage pipeline (spans loaded lazily on demand, not here):
       1. discover  — scan metadata files only (fast)
       2. build_tree — link children to parents, identify roots
-      3. aggregate costs — roll up total_cost_usd bottom-up per tree
-      4. sort — most-recent root first (by start_ts descending)
+      3. enrich — read pre-computed costs from observability JSONL (fast, last line only)
+      4. aggregate costs — roll up total_cost_usd bottom-up per tree
+      5. sort — most-recent root first (by start_ts descending)
 
     NOTE: Spans are NOT loaded here.  Call parse_spans() per-session when
     a specific session is requested (see server._load_session).
@@ -582,7 +629,18 @@ def build_session_tree(amplifier_home: Path) -> list[SessionNode]:
     # Stage 2: Build tree
     roots = build_tree(sessions)
 
-    # Stage 3: Aggregate costs — children roll up to parents
+    # Stage 3: Enrich with pre-computed observability costs (fast — last line only)
+    all_sids = set(sessions.keys())
+    obs_costs = _read_observability_costs(amplifier_home, all_sids)
+    for node in sessions.values():
+        if node.session_id in obs_costs:
+            entry = obs_costs[node.session_id]
+            node.cost_usd = entry["cost"]
+            node.total_cost_usd = entry["cost"]
+            node.total_input_tokens = entry["input_tokens"]
+            node.total_output_tokens = entry["output_tokens"]
+
+    # Stage 4: Aggregate costs — children roll up to parents
     for root in roots:
         aggregate_costs(root)
 
