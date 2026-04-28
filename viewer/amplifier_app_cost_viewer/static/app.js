@@ -1355,10 +1355,16 @@ class AcvBody extends HTMLElement {
               const cost = node.total_cost_usd || 0;
               // Priority: formatted agent_name > name > last 8 chars of session_id
               const displayName = (() => {
+                // 1. Clean agent_name field
                 const formatted = _formatAgentName(node.agent_name);
                 if (formatted) return formatted;
-                if (node.name) return node.name.slice(0, 28);
-                return node.session_id.slice(-8);
+                // 2. Agent name embedded in session_id: "0000…_foundation-git-ops" → "foundation:git-ops"
+                const fromSid = _formatAgentName(node.session_id);
+                if (fromSid && !/^[0-9a-f\-]+$/i.test(fromSid)) return fromSid;
+                // 3. Human-readable session name
+                if (node.name) return node.name.slice(0, 32);
+                // 4. First 8 chars of session_id (useful for copy-paste, not last 8)
+                return node.session_id.slice(0, 8);
               })();
               const isLive = !node.end_ts;
               const bg = absIdx % 2 === 0 ? '#0d1117' : '#161b22';
