@@ -1003,13 +1003,16 @@ class AcvOverview extends HTMLElement {
   #wireOverviewEvents(canvas) {
     const HANDLE_PX = 8;  // hit area pixels from edge (visual handle is 4px)
 
-    canvas.addEventListener('mousedown', e => {
+    // Use Pointer Capture API — routes ALL pointer events to this element
+    // regardless of where the cursor goes, including outside the browser window.
+    // This is the correct solution for drag interactions that must never lose tracking.
+    canvas.addEventListener('pointerdown', e => {
       const W  = canvas.width / (window.devicePixelRatio || 1);
       const x  = e.offsetX;
       const x1 = ovTimeToPixel(state.viewportStartMs, W);
       const x2 = ovTimeToPixel(state.viewportEndMs, W);
 
-      this.#dragStartX  = x;
+      this.#dragStartX  = e.clientX;   // store clientX — used in pointermove
       this.#dragStartMs = { start: state.viewportStartMs, end: state.viewportEndMs };
 
       if (x < x1 - HANDLE_PX || x > x2 + HANDLE_PX) {
@@ -1018,6 +1021,7 @@ class AcvOverview extends HTMLElement {
         const half = (state.viewportEndMs - state.viewportStartMs) / 2;
         setViewport(clickMs - half, clickMs + half);
         this.#dragMode = null;
+        return;
       } else if (x <= x1 + HANDLE_PX) {
         this.#dragMode = 'resize-left';
         canvas.style.cursor = 'ew-resize';
@@ -1028,54 +1032,58 @@ class AcvOverview extends HTMLElement {
         this.#dragMode = 'pan';
         canvas.style.cursor = 'grabbing';
       }
+
+      // Capture this pointer — all future events go to canvas even outside browser
+      canvas.setPointerCapture(e.pointerId);
       e.preventDefault();
-
-      // Register document-level drag listeners so drag continues even when mouse leaves canvas
-      if (!this.#dragMode) return;
-
-      const onMove = ev => {
-        const rect = canvas.getBoundingClientRect();
-        const cssW = rect.width;
-        const dx  = ev.clientX - rect.left - this.#dragStartX;
-        const dms = (dx / cssW) * state.totalDurationMs;
-
-        if (this.#dragMode === 'pan') {
-          const dur = this.#dragStartMs.end - this.#dragStartMs.start;
-          const clampedStart = Math.max(0, Math.min(state.totalDurationMs - dur, this.#dragStartMs.start + dms));
-          setViewport(clampedStart, clampedStart + dur, false);
-        } else if (this.#dragMode === 'resize-left') {
-          const clampedStart = Math.max(0, Math.min(this.#dragStartMs.end - MIN_SPAN_MS, this.#dragStartMs.start + dms));
-          setViewport(clampedStart, this.#dragStartMs.end, false);
-        } else if (this.#dragMode === 'resize-right') {
-          const clampedEnd = Math.min(state.totalDurationMs, Math.max(this.#dragStartMs.start + MIN_SPAN_MS, this.#dragStartMs.end + dms));
-          setViewport(this.#dragStartMs.start, clampedEnd, false);
-        }
-      };
-      const onUp = () => {
-        this.#dragMode = null;
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
     });
 
-    // Cursor feedback stays on canvas — drag movement is handled by document-level listeners
-    canvas.addEventListener('mousemove', e => {
-      if (this.#dragMode) return; // drag in progress, document listener handles movement
-      const W = canvas.width / (window.devicePixelRatio || 1);
-      const x  = e.offsetX;
-      const x1 = ovTimeToPixel(state.viewportStartMs, W);
-      const x2 = ovTimeToPixel(state.viewportEndMs, W);
-
-      if ((x >= x1 - HANDLE_PX && x <= x1 + HANDLE_PX) ||
-          (x >= x2 - HANDLE_PX && x <= x2 + HANDLE_PX)) {
-        canvas.style.cursor = 'ew-resize';
-      } else if (x > x1 && x < x2) {
-        canvas.style.cursor = 'grab';
-      } else {
-        canvas.style.cursor = 'crosshair';
+    canvas.addEventListener('pointermove', e => {
+      if (!this.#dragMode) {
+        // Cursor feedback when not dragging
+        const W  = canvas.width / (window.devicePixelRatio || 1);
+        const x  = e.offsetX;
+        const x1 = ovTimeToPixel(state.viewportStartMs, W);
+        const x2 = ovTimeToPixel(state.viewportEndMs, W);
+        if ((x >= x1 - HANDLE_PX && x <= x1 + HANDLE_PX) ||
+            (x >= x2 - HANDLE_PX && x <= x2 + HANDLE_PX)) {
+          canvas.style.cursor = 'ew-resize';
+        } else if (x > x1 && x < x2) {
+          canvas.style.cursor = 'grab';
+        } else {
+          canvas.style.cursor = 'crosshair';
+        }
+        return;
       }
+
+      // Drag in progress — compute delta from start clientX, convert to ms
+      const W   = canvas.getBoundingClientRect().width;
+      const dx  = e.clientX - this.#dragStartX;
+      const dms = (dx / W) * state.totalDurationMs;
+
+      if (this.#dragMode === 'pan') {
+        const dur = this.#dragStartMs.end - this.#dragStartMs.start;
+        const clampedStart = Math.max(0, Math.min(state.totalDurationMs - dur, this.#dragStartMs.start + dms));
+        setViewport(clampedStart, clampedStart + dur, false);
+      } else if (this.#dragMode === 'resize-left') {
+        const clampedStart = Math.max(0, Math.min(this.#dragStartMs.end - MIN_SPAN_MS, this.#dragStartMs.start + dms));
+        setViewport(clampedStart, this.#dragStartMs.end, false);
+      } else if (this.#dragMode === 'resize-right') {
+        const clampedEnd = Math.min(state.totalDurationMs, Math.max(this.#dragStartMs.start + MIN_SPAN_MS, this.#dragStartMs.end + dms));
+        setViewport(this.#dragStartMs.start, clampedEnd, false);
+      }
+    });
+
+    canvas.addEventListener('pointerup', e => {
+      if (!this.#dragMode) return;
+      this.#dragMode = null;
+      canvas.style.cursor = 'crosshair';
+      canvas.releasePointerCapture(e.pointerId);
+    });
+
+    canvas.addEventListener('pointercancel', e => {
+      this.#dragMode = null;
+      canvas.releasePointerCapture(e.pointerId);
     });
   }
 }
@@ -1441,19 +1449,22 @@ class AcvBody extends HTMLElement {
       this.#rulerCanvas = rc;
     }
 
-    // Measure actual rendered dimensions — border-bottom adds pixels the constant doesn't know about
-    const theadEl = this._root.querySelector('thead');
+    // Measure actual rendered row height (includes border-bottom)
     const firstTr = tbody.querySelector('tr.data-row');
-    if (theadEl) {
-      const measured = Math.round(theadEl.getBoundingClientRect().height);
-      if (measured > 0) this.#theadH = measured;
-    }
     if (firstTr) {
       const measured = Math.round(firstTr.getBoundingClientRect().height);
       if (measured > 0) this.#rowH = measured;
     }
 
-    // Position canvas using measured thead height, not hardcoded RULER_H
+    // Position canvas top by measuring tbody's actual offset from the scroll container
+    // This naturally accounts for thead height + any border/gap between thead and tbody
+    // without any arithmetic that might be off by 1px.
+    const tbodyTop = Math.round(
+      tbody.getBoundingClientRect().top
+      - tableWrap.getBoundingClientRect().top
+      + tableWrap.scrollTop
+    );
+    if (tbodyTop > 0) this.#theadH = tbodyTop;
     mc.style.top  = this.#theadH + 'px';
     mc.style.left = state.labelColW + 'px';
 
