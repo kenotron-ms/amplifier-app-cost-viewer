@@ -1182,17 +1182,17 @@ class AcvBody extends HTMLElement {
       this.#ensureCanvases();
       this.#scheduleRedraw();
       this.#wireColResize();
-      const wrap = this._root.getElementById('table-wrap');
-      if (wrap) {
-        wrap.addEventListener('scroll', () => {
-          state.scrollTop = wrap.scrollTop;
-          if (this.#computeVirtualWindow()) { this.#scheduleRender(); }
-          this.#scheduleRedraw();
-        });
-      }
       this.#setupResizeObserver();
     });
   }
+
+  /** Scroll handler — arrow property gives a stable reference so Lit doesn't
+   *  add/remove the listener on every render cycle. */
+  #onTableScroll = (e) => {
+    state.scrollTop = e.currentTarget.scrollTop;
+    if (this.#computeVirtualWindow()) this.#scheduleRender();
+    this.#scheduleRedraw();
+  };
 
   disconnectedCallback() {
     if (this.#resizeObserver) {
@@ -1385,7 +1385,7 @@ class AcvBody extends HTMLElement {
             ${state.modelFilter.size > 0 ? html`<button class="filter-clear" @click=${() => { state.modelFilter.clear(); renderAll(); }}>✕ clear</button>` : ''}
           </div>`;
         })()}
-      <div class="table-wrap" id="table-wrap">
+      <div class="table-wrap" id="table-wrap" @scroll=${this.#onTableScroll}>
         <table>
           <colgroup>
             <col class="col-label">
@@ -2652,6 +2652,9 @@ async function loadSession(id) {
     setViewport(0, state.totalDurationMs, false);
     // Expand root by default
     state.expandedSessions = new Set([id]);
+    // Reset tree scroll to top so virtual window starts at row 0
+    const tableWrap = document.getElementById('body')?.shadowRoot?.getElementById('table-wrap');
+    if (tableWrap) tableWrap.scrollTop = 0;
   } finally {
     state.loading = false;
     renderAll();
@@ -2825,6 +2828,19 @@ async function init() {
     state.loading = false;
     renderAll();
   }
+
+  // Background-load remaining session pages so the full list is always available.
+  // Each batch fetches costs after loading, then re-renders the toolbar dropdown.
+  (async () => {
+    while (state.hasMore) {
+      try {
+        const prev = state.sessions.length;
+        await fetchSessions(state.sessions.length);
+        renderAll();
+        fetchCosts(state.sessions.slice(prev)); // costs for new batch only
+      } catch { break; }
+    }
+  })();
 }
 
 document.addEventListener('DOMContentLoaded', init);
