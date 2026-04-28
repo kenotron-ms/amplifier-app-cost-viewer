@@ -278,17 +278,31 @@ def parse_spans(
     spans: list[Span] = []
 
     # ------------------------------------------------------------------
-    # LLM spans: provider:request → llm:response (sequential zip)
+    # LLM spans: provider:request → llm:response (document-order pairing)
     # ------------------------------------------------------------------
-    provider_requests = [e for e in events if e.get("event") == "provider:request"]
-    llm_responses = [e for e in events if e.get("event") == "llm:response"]
+    # Walk the event stream in order and match each provider:request with the
+    # next llm:response that follows it.  This correctly handles two edge cases
+    # that break simple zip() pairing:
+    #
+    #   1. Orphan llm:response — emitted on session resume for an in-flight
+    #      request that started before the checkpoint.  No provider:request
+    #      precedes it in this file, so it is skipped.
+    #
+    #   2. Consecutive provider:request events (retries) — the last request
+    #      before the next response wins; earlier ones are silently replaced.
+    _llm_pairs: list[tuple[dict, dict]] = []
+    _req_pending: dict | None = None
+    for _ev in events:
+        _ev_name = _ev.get("event")
+        if _ev_name == "provider:request":
+            _req_pending = _ev  # replace any prior unmatched request (retry)
+        elif _ev_name == "llm:response":
+            if _req_pending is None:
+                continue  # orphan — skip
+            _llm_pairs.append((_req_pending, _ev))
+            _req_pending = None
 
-    # Pairing assumes strict request→response interleaving (sequential zip).
-    # If counts diverge, the shorter list wins — unmatched events are silently
-    # dropped.  This holds for the current Amplifier event schema; if the schema
-    # adds a correlation ID to provider:request + llm:response in the future,
-    # switch to ID-matched pairing for robustness.
-    for req, resp in zip(provider_requests, llm_responses):
+    for req, resp in _llm_pairs:
         req_data = req.get("data", {})
         resp_data = resp.get("data", {})
         usage = resp_data.get("usage", {})

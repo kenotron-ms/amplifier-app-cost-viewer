@@ -24,7 +24,7 @@ const ROW_H       = 32;    // px per session row
 const RULER_H     = 28;    // px ruler strip height
 const SPAN_H      = 20;    // px span bar height
 const HEATMAP_H   = 20;    // px heatmap row height
-const IO_TRUNCATE = 500;   // chars before "show more"
+
 const MIN_SPAN_MS = 100;   // minimum viewport span in milliseconds
 const VIRTUAL_BUFFER = 5;  // extra rows to render above/below visible area
 
@@ -439,7 +439,7 @@ function _extractContent(value) {
     if (value.type === 'tool_result') return _extractContent(value.content ?? '\u2014');
     if (value.type === 'tool_use')    return `[called: ${value.name || value.type}]`;
     // Last resort: compact JSON — at least shows structure, never "[object Object]"
-    try { return JSON.stringify(value, null, 2).slice(0, 800); }
+    try { return JSON.stringify(value, null, 2); }
     catch { return '\u2014'; }
   }
   // Primitive (number, boolean, etc.)
@@ -2396,24 +2396,10 @@ class AcvDetail extends HTMLElement {
       : _extractContent(value);
     if (!str || str === '\u2014') return '';
 
-    const truncated = str.length > IO_TRUNCATE;
-    const display   = truncated ? str.slice(0, IO_TRUNCATE) + '\u2026' : str;
-
-    const handleShowMore = (e) => {
-      e.preventDefault();
-      const block = e.target.closest('.io-block');
-      const pre   = block?.querySelector('pre');
-      if (pre) pre.textContent = str;
-      e.target.remove();
-    };
-
     return html`
       <div class="io-block">
         <div class="io-label">${label}</div>
-        <div class="io-content">
-          <pre>${display}</pre>
-          ${truncated ? html`<a class="show-more" href="#" @click=${handleShowMore}>show more</a>` : ''}
-        </div>
+        <div class="io-content"><pre>${str}</pre></div>
       </div>
     `;
   }
