@@ -1519,9 +1519,9 @@ class TestV3AcvBody:
         ), "Must register acv-body via customElements.define"
 
     def test_label_column_width(self) -> None:
-        """AcvBody must declare a 220px label column."""
-        assert "220px" in self.content, (
-            "AcvBody must declare a 220px wide label column (col.col-label or equivalent)"
+        """AcvBody must use state.labelColW for the label column width (resizable)."""
+        assert "state.labelColW" in self.content, (
+            "AcvBody must use state.labelColW (not hardcoded px) for the label column width"
         )
 
     def test_ruler_spans_full_width(self) -> None:
@@ -2492,4 +2492,53 @@ def test_pie_chart_renderer_function(app_js_code: str) -> None:
     """Pie chart renderer method must exist."""
     assert '#renderPieChart' in app_js_code or 'renderPieChart' in app_js_code, (
         "AcvDetail must define a '#renderPieChart' or 'renderPieChart' method"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Resizable label column — state.labelColW + drag handle
+# ---------------------------------------------------------------------------
+
+
+def test_label_col_width_in_state(app_js_code: str) -> None:
+    """state must have labelColW for resizable column width."""
+    assert 'labelColW' in app_js_code, (
+        "state object must declare 'labelColW' field for resizable label column"
+    )
+
+
+def test_label_col_width_default_280(app_js_code: str) -> None:
+    """Default labelColW must be 280px (wider than 220 to fit agent names)."""
+    assert 'labelColW: 280' in app_js_code, (
+        "state.labelColW must default to 280 — wide enough for 'superpowers:implementer'"
+    )
+
+
+def test_col_resize_handle_exists(app_js_code: str) -> None:
+    """th-label must contain a col-resize-handle drag strip."""
+    assert 'col-resize-handle' in app_js_code, (
+        "th-label must include a 'col-resize-handle' div for drag-to-resize"
+    )
+    assert 'col-resize' in app_js_code, (
+        "CSS must include 'cursor: col-resize' for the resize handle"
+    )
+
+
+def test_canvas_left_uses_label_col_width(app_js_code: str) -> None:
+    """Canvas left position must use state.labelColW, not hardcoded 220."""
+    assert 'state.labelColW' in app_js_code, (
+        "Canvas left positioning must reference state.labelColW instead of 220"
+    )
+    assert "style.left = '220px'" not in app_js_code, (
+        "mc.style.left must not be hardcoded to '220px'"
+    )
+    assert "style.left = 220" not in app_js_code, (
+        "mc.style.left must not be hardcoded to 220"
+    )
+
+
+def test_no_hardcoded_220_in_acv_body_styles(app_js_code: str) -> None:
+    """AcvBody template styles must not hardcode 220px for the label column."""
+    assert "width: 220px" not in app_js_code, (
+        "AcvBody CSS template must use state.labelColW instead of hardcoded 'width: 220px'"
     )

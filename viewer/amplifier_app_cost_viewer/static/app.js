@@ -51,6 +51,7 @@ const state = {
   viewportStartMs: 0,    // viewport start time in ms (v3 viewport model)
   viewportEndMs:   0,    // viewport end time in ms (v3 viewport model)
   _animRaf:        null, // requestAnimationFrame handle for in-flight viewport animation
+  labelColW: 280,        // left column width in px — wider default fits "superpowers:implementer"
 };
 
 // =============================================================================
@@ -996,7 +997,7 @@ customElements.define('acv-overview', AcvOverview);
 
 // =============================================================================
 // Section 9b: Custom element — AcvBody  (CSS Grid shell with labels)
-// Two-column CSS Grid: 220px labels column + 1fr canvas column.
+// Two-column CSS Grid: labelColW labels column (resizable) + 1fr canvas column.
 // Row 1: sticky ruler wrapper (spans both columns).
 // Row 2: labels column (tree-like labels with depth indentation) + canvas column.
 // Dispatches toggle-expand and session-select CustomEvents on label row clicks.
@@ -1033,6 +1034,7 @@ class AcvBody extends HTMLElement {
     requestAnimationFrame(() => {
       this.#ensureCanvases();
       this.#scheduleRedraw();
+      this.#wireColResize();
       const wrap = this._root.getElementById('table-wrap');
       if (wrap) {
         wrap.addEventListener('scroll', () => {
@@ -1067,6 +1069,7 @@ class AcvBody extends HTMLElement {
     requestAnimationFrame(() => {
       this.#ensureCanvases();
       this.#scheduleRedraw();
+      this.#wireColResize();
     });
   }
 
@@ -1107,15 +1110,25 @@ class AcvBody extends HTMLElement {
           width: 100%;
           table-layout: fixed;
         }
-        col.col-label { width: 220px; }
+        col.col-label { width: ${state.labelColW}px; }
         col.col-canvas { width: auto; }
         .th-label {
           position: sticky; left: 0; top: 0; z-index: 3;
-          width: 220px; height: ${RULER_H}px;
+          width: ${state.labelColW}px; height: ${RULER_H}px;
           background: #161b22;
           border-right: 1px solid #30363d;
           border-bottom: 1px solid #30363d;
+          position: relative;
         }
+        .col-resize-handle {
+          position: absolute;
+          top: 0; right: -3px;
+          width: 6px; height: 100%;
+          cursor: col-resize;
+          z-index: 10;
+          background: transparent;
+        }
+        .col-resize-handle:hover { background: rgba(88, 166, 255, 0.4); }
         .th-ruler {
           position: sticky; top: 0; z-index: 2;
           height: ${RULER_H}px; padding: 0;
@@ -1125,7 +1138,7 @@ class AcvBody extends HTMLElement {
         .th-ruler canvas { display: block; width: 100%; height: ${RULER_H}px; }
         .td-label {
           position: sticky; left: 0; z-index: 1;
-          height: ${ROW_H}px; width: 220px;
+          height: ${ROW_H}px; width: ${state.labelColW}px;
           padding: 0 8px;
           font-size: 11px; font-family: "SF Mono", Consolas, Monaco, monospace;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1229,7 +1242,7 @@ class AcvBody extends HTMLElement {
           </colgroup>
           <thead>
             <tr>
-              <th class="th-label"></th>
+              <th class="th-label"><div class="col-resize-handle" id="col-resize-handle"></div></th>
               <th class="th-ruler"><canvas id="ruler-canvas"></canvas></th>
             </tr>
           </thead>
@@ -1305,7 +1318,7 @@ class AcvBody extends HTMLElement {
     const wrapRect   = tableWrap.getBoundingClientRect();
     const rulerRect  = thRuler ? thRuler.getBoundingClientRect() : wrapRect;
 
-    const canvasW = Math.max(1, Math.round(wrapRect.width  - 220));
+    const canvasW = Math.max(1, Math.round(wrapRect.width  - state.labelColW));
     const canvasH = Math.max(1, Math.round(tbodyRect.height));
     const rulerW  = Math.max(1, Math.round(rulerRect.width));
 
@@ -1355,7 +1368,7 @@ class AcvBody extends HTMLElement {
 
     // Position canvas using measured thead height, not hardcoded RULER_H
     mc.style.top  = this.#theadH + 'px';
-    mc.style.left = '220px';
+    mc.style.left = state.labelColW + 'px';
 
     // Wire events once
     if (!mc._v3wired) { this.#wireCanvasEvents(mc); mc._v3wired = true; }
@@ -1680,6 +1693,38 @@ class AcvBody extends HTMLElement {
         cursorMs + (1 - ratio) * newVisible,
       );
     }, { passive: false });
+  }
+
+  #wireColResize() {
+    const handle = this._root.getElementById('col-resize-handle');
+    if (!handle || handle._v3wired) return;
+    handle._v3wired = true;
+
+    let startX = 0;
+    let startW = 0;
+
+    handle.addEventListener('mousedown', e => {
+      startX = e.clientX;
+      startW = state.labelColW;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const onMove = ev => {
+        const delta = ev.clientX - startX;
+        state.labelColW = Math.max(120, Math.min(500, startW + delta));
+        this._render();
+        this.#ensureCanvases();
+        this.#scheduleRedraw();
+      };
+
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
   }
 
   _onLabelClick(sid, hasChildren) {
