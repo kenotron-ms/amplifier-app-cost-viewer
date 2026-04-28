@@ -1,53 +1,77 @@
-# hook-observability Development Context
+# amplifier-app-cost-viewer Development Context
 
-You are working on `hook-observability`, an Amplifier hook module that captures every LLM
-call's token costs and writes a rotating JSONL observability log. It optionally ships to
-Langfuse for visualization.
+You are working on `amplifier-app-cost-viewer`, a FastAPI + vanilla JS SPA that reads
+Amplifier session event logs directly from `~/.amplifier/projects/` and renders an
+interactive token cost timeline.
 
 ## Project Structure
 
 ```
 token-cost/
 ├── bundle.md                    ← this dev bundle
-├── pyproject.toml               ← package config (entry: hook_observability:mount)
-├── src/
-│   └── hook_observability/
-│       ├── __init__.py          ← HookObservability class + mount()
-│       ├── jsonl_writer.py      ← JSONL log writer (session-scoped filenames)
-│       ├── langfuse_writer.py   ← Langfuse integration (Phase 2)
-│       └── pricing.py           ← token pricing table (Anthropic, OpenAI, Gemini)
-└── tests/
+├── scripts/
+│   └── update_pricing.py        ← refreshes STATIC_PRICING from LiteLLM catalog
+└── viewer/
+    ├── pyproject.toml           ← package config (entry: amplifier-cost-viewer)
+    └── amplifier_app_cost_viewer/
+        ├── __init__.py
+        ├── __main__.py          ← CLI entry: amplifier-cost-viewer [--host] [--port]
+        ├── server.py            ← FastAPI app + REST endpoints + cache refresh loop
+        ├── reader.py            ← event log parsing, span extraction, session tree
+        ├── pricing.py           ← static pricing table (Anthropic, OpenAI, Google)
+        └── static/
+            ├── index.html
+            ├── app.js           ← vanilla JS SPA (Lit custom elements, canvas renderer)
+            └── style.css
 ```
 
-## Key Data Shapes
+## Data Flow
 
-Every provider response emits one record:
-```json
-{
-  "ts": "2026-04-22T17:00:00Z",
-  "type": "provider_call",
-  "session_id": "46508d34-...",
-  "provider": "anthropic",
-  "model": "claude-sonnet-4-5",
-  "input_tokens": 12345,
-  "output_tokens": 567,
-  "cost_usd": 0.045678
-}
+The viewer reads **directly from the Amplifier kernel's event logs** — no hook module required:
+
+```
+~/.amplifier/projects/<project>/sessions/<session_id>/
+    events.jsonl      ← kernel event stream (provider:request, llm:response, tool:pre/post, etc.)
+    metadata.json     ← session metadata
 ```
 
-Every session end emits a summary:
-```json
-{
-  "ts": "2026-04-22T18:00:00Z",
-  "type": "session_summary",
-  "session_id": "46508d34-...",
-  "total_cost_usd": 0.345678,
-  "provider_calls": 42,
-  "tool_calls": 156
-}
+Token cost is computed locally from token counts × pricing table in `pricing.py`.
+No provider returns USD cost in API responses — all three (Anthropic, OpenAI, Google)
+return token counts only; cost must be calculated client-side.
+
+## Key Token Fields (from kernel events)
+
+The `llm:response` event's `usage` object uses these normalized field names:
+- `input_tokens` / `output_tokens` — standard token counts
+- `cache_read_tokens` — tokens served from prompt cache (lower cost)
+- `cache_write_tokens` — tokens written to cache (higher cost)
+
+The pricing table maps these to `cache_read_input_token_cost` and
+`cache_creation_input_token_cost` per model.
+
+## REST API
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/sessions` | Paginated root session list |
+| `GET /api/sessions/{id}` | Full session tree with spans |
+| `GET /api/sessions/{id}/spans` | Flattened spans (lazy child load) |
+| `GET /api/sessions/{id}/child-spans/{child_id}` | Single child's spans |
+| `POST /api/refresh` | Bust in-memory cache |
+
+## Running the Viewer
+
+```bash
+cd viewer
+uv run amplifier-cost-viewer          # default: 127.0.0.1:8181
+uv run amplifier-cost-viewer --port 9000
 ```
 
-Files live at: `~/.amplifier/observability/<session_id>.jsonl`
+## Updating Pricing
+
+```bash
+python scripts/update_pricing.py      # fetches from LiteLLM, rewrites pricing.py
+```
 
 ## Development Workflow
 
@@ -65,9 +89,4 @@ Run checks at any time via the `python_check` tool, or ask the `python-dev` agen
 - **Format**: ruff format
 - **Lint**: ruff check
 - **Types**: pyright
-- **Tests**: `pytest tests/`
-
-## Self-Observability Note
-
-This dev bundle includes the hook itself — token costs from this session are captured
-to `~/.amplifier/observability/`. You are watching costs while building the cost observer.
+- **Tests**: `cd viewer && pytest tests/`

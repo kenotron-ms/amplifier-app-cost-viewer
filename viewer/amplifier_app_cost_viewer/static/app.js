@@ -28,6 +28,9 @@ const IO_TRUNCATE = 500;   // chars before "show more"
 const MIN_SPAN_MS = 100;   // minimum viewport span in milliseconds
 const VIRTUAL_BUFFER = 5;  // extra rows to render above/below visible area
 
+// Pricing rates fetched once from /api/pricing at startup — {modelName: {input, output, cache_read, cache_write}} in $/M tokens
+let _pricing = {};
+
 // =============================================================================
 // Section 1: State
 // Central state object — all UI reads from here, never from DOM.
@@ -664,6 +667,20 @@ function _animateZoom(targetScale, anchorMs, anchorPx) {
   }
 
   state._zoomAnimRaf = requestAnimationFrame(step);
+}
+
+// Longest-prefix match on _pricing to find rates for a given model name.
+// Returns {input, output, cache_read, cache_write} in $/M tokens, or null.
+function _lookupRates(model) {
+  if (!model || !Object.keys(_pricing).length) return null;
+  if (_pricing[model]) return _pricing[model];
+  let best = null, bestLen = 0;
+  for (const key of Object.keys(_pricing)) {
+    if (model.startsWith(key) && key.length > bestLen) {
+      best = _pricing[key]; bestLen = key.length;
+    }
+  }
+  return best;
 }
 
 // =============================================================================
@@ -2020,6 +2037,7 @@ class AcvDetail extends HTMLElement {
           <div class="pie-row">
             <canvas class="pie-canvas"></canvas>
             <div class="pie-legend"></div>
+            <div class="rate-breakdown"></div>
           </div>
         </div>
       `;
@@ -2067,24 +2085,38 @@ class AcvDetail extends HTMLElement {
     const spans = state.spans || [];
     if (spans.length === 0) return;
 
-    // Aggregate cost by model — only spans within the current viewport selection
+    // If pricing hasn't loaded yet, fetch it now and re-render when it arrives.
+    if (!Object.keys(_pricing).length) {
+      fetch('/api/pricing')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data?.rates) { _pricing = data.rates; this.update(); } })
+        .catch(() => {});
+      // Fall through and render with ? for now — update() will re-render with rates
+    }
+
+    // Aggregate cost + token counts by model — only spans within the current viewport selection
     const viewStart = state.viewportStartMs || 0;
     const viewEnd   = state.viewportEndMs   || state.totalDurationMs || Infinity;
-    const byCost = new Map();
+    const byModel = new Map();
     for (const s of spans) {
       if (!s.cost_usd || s.cost_usd <= 0) continue;
-      // Include span only if it overlaps the viewport range
       const spanStart = s.start_ms || 0;
       const spanEnd   = s.end_ms   || spanStart;
       if (spanEnd < viewStart || spanStart > viewEnd) continue;
       const key = s.model || s.provider || 'unknown';
-      byCost.set(key, (byCost.get(key) || 0) + s.cost_usd);
+      const e = byModel.get(key) || { cost: 0, inputTok: 0, outputTok: 0, cacheReadTok: 0, cacheWriteTok: 0 };
+      e.cost          += s.cost_usd;
+      e.inputTok      += s.input_tokens        || 0;
+      e.outputTok     += s.output_tokens       || 0;
+      e.cacheReadTok  += s.cache_read_tokens   || 0;
+      e.cacheWriteTok += s.cache_write_tokens  || 0;
+      byModel.set(key, e);
     }
-    if (byCost.size === 0) return;
+    if (byModel.size === 0) return;
 
     // Sort by cost descending
-    const entries = [...byCost.entries()].sort((a, b) => b[1] - a[1]);
-    const total = entries.reduce((sum, [, v]) => sum + v, 0);
+    const entries = [...byModel.entries()].sort((a, b) => b[1].cost - a[1].cost);
+    const total = entries.reduce((sum, [, v]) => sum + v.cost, 0);
 
     // Draw pie chart on canvas
     const canvas = container.querySelector('.pie-canvas');
@@ -2101,8 +2133,8 @@ class AcvDetail extends HTMLElement {
     const cx = SIZE / 2, cy = SIZE / 2, r = SIZE / 2 - 4;
     let startAngle = -Math.PI / 2;
 
-    for (const [model, cost] of entries) {
-      const fraction = cost / total;
+    for (const [model, data] of entries) {
+      const fraction = data.cost / total;
       const endAngle = startAngle + fraction * 2 * Math.PI;
       const color = _spanColor({ type: 'llm', model, provider: model.includes('claude') ? 'anthropic' : (model.includes('gpt') || model.startsWith('o')) ? 'openai' : 'google' });
       ctx.beginPath();
@@ -2117,13 +2149,71 @@ class AcvDetail extends HTMLElement {
     // Render legend
     const legend = container.querySelector('.pie-legend');
     if (legend) {
-      legend.innerHTML = entries.slice(0, 6).map(([model, cost]) => {
+      legend.innerHTML = entries.slice(0, 6).map(([model, data]) => {
         const color = _spanColor({ type: 'llm', model, provider: model.includes('claude') ? 'anthropic' : (model.includes('gpt') || model.startsWith('o')) ? 'openai' : 'google' });
-        const pct   = (cost / total * 100).toFixed(1);
+        const pct   = (data.cost / total * 100).toFixed(1);
         const short = _shortModelName(model);
         return `<div class="pie-item"><span class="pie-dot" style="background:${color}"></span><span class="pie-name">${short}</span><span class="pie-pct">${pct}%</span></div>`;
       }).join('');
     }
+
+    // Render pricing math breakdown
+    const breakdown = container.querySelector('.rate-breakdown');
+    if (breakdown) this.#renderBreakdown(breakdown, byModel);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: pricing math breakdown — per-model token × rate = cost
+  // ---------------------------------------------------------------------------
+
+  #renderBreakdown(el, byModel) {
+    if (!byModel || byModel.size === 0) { el.innerHTML = ''; return; }
+
+    const entries = [...byModel.entries()].sort((a, b) => b[1].cost - a[1].cost);
+
+    const fmtTok  = n => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+    const fmtUsd  = c => '$' + c.toFixed(4);
+    const fmtRate = r => {
+      if (!r) return '—';
+      if (r >= 1) return '$' + r.toFixed(2) + '/M';
+      if (r >= 0.1) return '$' + r.toFixed(3) + '/M';
+      return '$' + r.toFixed(4) + '/M';
+    };
+
+    let out = '';
+    for (const [key, d] of entries) {
+      const rates = d.rates || _lookupRates(key);  // span-embedded rates (primary) or fallback
+      const short = _shortModelName(key);
+      const prov  = key.includes('claude') ? 'anthropic' : (key.includes('gpt') || key.startsWith('o')) ? 'openai' : 'google';
+      const color = _spanColor({ type: 'llm', model: key, provider: prov });
+
+      out += `<div class="rb-group">`;
+      out += `<div class="rb-head"><span class="pie-dot" style="background:${color}"></span><span class="rb-hname">${short}</span><span class="rb-htotal">${fmtUsd(d.cost)}</span></div>`;
+      out += `<table class="rb-table">`;
+
+      const rows = [
+        ['in',      d.inputTok,      rates?.input       ?? null],
+        ['out',     d.outputTok,     rates?.output      ?? null],
+        ['cache-r', d.cacheReadTok,  rates?.cache_read  ?? null],
+        ['cache-w', d.cacheWriteTok, rates?.cache_write ?? null],
+      ];
+
+      for (const [label, tok, rate] of rows) {
+        if (!tok) continue;
+        const lineCost = (rate !== null && rate > 0) ? tok * rate / 1_000_000 : null;
+        out += `<tr>`;
+        out += `<td class="rb-label">${label}</td>`;
+        out += `<td class="rb-tok">${fmtTok(tok)}</td>`;
+        out += `<td class="rb-rate">${rate !== null ? fmtRate(rate) : '?'}</td>`;
+        out += `<td class="rb-eq">=</td>`;
+        out += `<td class="rb-cost">${lineCost !== null ? fmtUsd(lineCost) : '?'}</td>`;
+        out += `</tr>`;
+      }
+
+      out += `</table></div>`;
+    }
+
+    el.innerHTML = out;
   }
 
   // ---------------------------------------------------------------------------
@@ -2492,15 +2582,29 @@ class AcvDetail extends HTMLElement {
       details > summary::before { content: '▶'; font-size: 8px; color: #8b949e; margin-right: 4px; }
       details[open] > summary::before { content: '▼'; }
 
-      /* ---- Pie chart (Summary tab) ---- */
+      /* ---- Pie chart + pricing breakdown (Summary tab) ---- */
       .pie-section { margin-top: 12px; padding-top: 8px; border-top: 1px solid #21262d; }
       .pie-title { font-size: 10px; color: #8b949e; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
-      .pie-row { display: flex; align-items: center; gap: 12px; }
-      .pie-legend { display: flex; flex-direction: column; gap: 3px; }
+      .pie-row { display: flex; align-items: flex-start; gap: 12px; }
+      .pie-legend { display: flex; flex-direction: column; gap: 3px; min-width: 90px; }
       .pie-item { display: flex; align-items: center; gap: 4px; font-size: 10px; }
       .pie-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
       .pie-name { color: #e6edf3; flex: 1; }
       .pie-pct { color: #8b949e; }
+
+      /* ---- Rate breakdown table ---- */
+      .rate-breakdown { flex: 0 0 auto; }
+      .rb-group { margin-bottom: 8px; }
+      .rb-group:last-child { margin-bottom: 0; }
+      .rb-head { display: flex; align-items: center; gap: 5px; font-size: 10px; margin-bottom: 2px; }
+      .rb-hname { color: #e6edf3; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .rb-htotal { color: #58a6ff; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .rb-table { border-collapse: collapse; font-size: 10px; width: 100%; }
+      .rb-label { color: #8b949e; padding: 1px 5px 1px 12px; white-space: nowrap; }
+      .rb-tok { color: #e6edf3; text-align: right; padding: 1px 5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .rb-rate { color: #8b949e; text-align: right; padding: 1px 5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .rb-eq { color: #484f58; padding: 1px 3px; }
+      .rb-cost { color: #58a6ff; text-align: right; padding: 1px 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
     `;
   }
 }
@@ -2672,9 +2776,15 @@ async function init() {
     }
   });
 
-  // Initial data load: fetchSessions then loadSession first session
+  // Initial data load: fetch pricing rates, then sessions
   state.loading = true;
   renderAll(); // immediately show loading state
+
+  // Fetch pricing rates once — non-fatal if unavailable
+  try {
+    const pr = await fetch('/api/pricing');
+    if (pr.ok) _pricing = (await pr.json()).rates || {};
+  } catch (_) { /* offline or old server — degraded gracefully */ }
 
   try {
     await fetchSessions();

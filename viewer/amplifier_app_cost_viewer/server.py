@@ -381,3 +381,20 @@ def get_child_spans(session_id: str, child_session_id: str) -> dict:
     # Children of root are at depth=1; their children at depth=2, etc.
     spans_out = _flatten_spans(child, depth=1)
     return {"spans": spans_out, "session_id": child_session_id}
+
+
+@app.get("/api/pricing")
+def get_pricing() -> dict:
+    """Return the static pricing table with rates in USD per million tokens."""
+    from amplifier_app_cost_viewer import pricing as _p
+
+    rates = {
+        model: {
+            "input":       round(entry.get("input_cost_per_token", 0)            * 1_000_000, 6),
+            "output":      round(entry.get("output_cost_per_token", 0)           * 1_000_000, 6),
+            "cache_read":  round(entry.get("cache_read_input_token_cost", 0)     * 1_000_000, 6),
+            "cache_write": round(entry.get("cache_creation_input_token_cost", 0) * 1_000_000, 6),
+        }
+        for model, entry in _p.STATIC_PRICING.items()
+    }
+    return {"rates": rates}
