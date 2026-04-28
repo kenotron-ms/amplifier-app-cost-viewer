@@ -1,156 +1,52 @@
-# hook-observability
+# amplifier-app-cost-viewer
 
-    Amplifier hook module for token cost observability. Writes a JSONL log of every
-    LLM call, tool call, and session summary. Optionally ships to Langfuse.
+Interactive token cost timeline for [Amplifier](https://github.com/microsoft/amplifier) sessions. Reads directly from `~/.amplifier/projects/` — no instrumentation or hook module required.
 
-    ## What it captures
+![Amplifier Cost Viewer](docs/screenshot.png)
 
-    Every provider response fires one `provider_call` JSON record:
+## What it shows
 
-    ```json
-    {
-      "ts": "2026-04-22T17:00:00Z",
-      "type": "provider_call",
-      "session_id": "46508d34-...",
-      "provider": "anthropic",
-      "model": "claude-sonnet-4-5",
-      "input_tokens": 12345,
-      "output_tokens": 567,
-      "cache_read_tokens": 300,
-      "cache_write_tokens": 0,
-      "reasoning_tokens": 0,
-      "total_tokens": 12912,
-      "cost_usd": 0.045678,
-      "latency_ms": 2341.5
-    }
-    ```
+- **Timeline** — every LLM call as a span bar, color-coded by model, across the full session duration
+- **Agent tree** — hierarchical breakdown of root session → delegated sub-agents → cost per branch
+- **Pie chart** — cost share by model for whatever time window is in view
+- **Pricing math** — per-model breakdown showing token type × rate = cost:
+  ```
+  sonnet-4-6          $10.03
+    in      1.8k  ×  $3.00/M  =  $0.0055
+    out    60.6k  ×  $15.00/M =  $0.9091
+    cache-r  2.1M  ×  $0.30/M  =  $0.6374
+    cache-w  2.3M  ×  $3.75/M  =  $8.5314
+  ```
+- **Model filter pills** — toggle individual models on/off in the timeline
+- **Click any span** — opens the detail drawer with duration, cost, token counts, and raw input/output
 
-    Every session end fires a `session_summary`:
+## Install & run
 
-    ```json
-    {
-      "ts": "2026-04-22T18:00:00Z",
-      "type": "session_summary",
-      "session_id": "46508d34-...",
-      "duration_s": 3612.4,
-      "total_input_tokens": 98765,
-      "total_output_tokens": 12345,
-      "total_cost_usd": 0.345678,
-      "provider_calls": 42,
-      "tool_calls": 156
-    }
-    ```
+```bash
+cd viewer
+uv run amplifier-cost-viewer               # http://127.0.0.1:8181
+uv run amplifier-cost-viewer --port 9000   # custom port
+uv run amplifier-cost-viewer --host 0.0.0.0 --port 8181  # network-accessible
+```
 
-    Files rotate daily: `~/.amplifier/observability/YYYY-MM-DD.jsonl`
+Requires Python 3.11+. Dependencies: `fastapi`, `uvicorn` — no Amplifier installation needed.
 
-    Quick view of today's spend:
+## Data source
 
-    ```bash
-    jq -r 'select(.type=="session_summary") | "\(.session_id[:8]) $\(.total_cost_usd) \(.provider_calls) calls"' \
-      ~/.amplifier/observability/$(date +%Y-%m-%d).jsonl
-    ```
+Reads the Amplifier kernel's native event logs:
 
-    ---
+```
+~/.amplifier/projects/<project>/sessions/<session_id>/
+    events.jsonl    — kernel event stream
+    metadata.json   — session metadata
+```
 
-    ## Phase 1 — JSONL only (no external dependencies)
+Token cost is computed locally using the bundled pricing table (`viewer/amplifier_app_cost_viewer/pricing.py`).
 
-    ### Install
+## Updating pricing
 
-    ```bash
-    cd /path/to/this/repo
-    pip install -e .
-    ```
+```bash
+python scripts/update_pricing.py
+```
 
-    ### Configure in your bundle
-
-    ```yaml
-    hooks:
-      - module: hook-observability
-        source: git+https://github.com/kenotron-ms/token-cost@main
-        config:
-          output_dir: "~/.amplifier/observability"
-          model: "claude-sonnet-4-5"  # fallback if model not in response metadata
-    ```
-
-    Or for local dev:
-
-    ```yaml
-    hooks:
-      - module: hook-observability
-        source: /Users/ken/workspace/ms/token-cost
-        config:
-          output_dir: "~/.amplifier/observability"
-    ```
-
-    ---
-
-    ## Phase 2 — Langfuse
-
-    ### Start self-hosted Langfuse
-
-    ```bash
-    git clone https://github.com/langfuse/langfuse.git
-    cd langfuse
-    # Edit docker-compose.yml — update the lines marked CHANGEME
-    docker compose up -d
-    # UI at http://localhost:3000 (~2 min startup)
-    ```
-
-    Create a project → Settings → API Keys → copy public + secret key.
-
-    ### Install with Langfuse support
-
-    ```bash
-    pip install -e ".[langfuse]"
-    ```
-
-    ### Configure
-
-    ```yaml
-    hooks:
-      - module: hook-observability
-        source: /Users/ken/workspace/ms/token-cost
-        config:
-          output_dir: "~/.amplifier/observability"
-          model: "claude-sonnet-4-5"
-          langfuse_enabled: true
-          langfuse_host: "http://localhost:3000"
-          langfuse_public_key: "pk-lf-..."
-          langfuse_secret_key: "sk-lf-..."
-    ```
-
-    Both JSONL and Langfuse run simultaneously — JSONL is always on regardless of
-    Langfuse status. If Langfuse is unreachable, JSONL continues writing; errors are
-    logged at WARNING level and do not interrupt the session.
-
-    ---
-
-    ## Pricing table
-
-    `src/hook_observability/pricing.py` — update when rates change. Includes Anthropic
-    Claude 3.x/4.x, OpenAI GPT-4o/o-series, and Google Gemini families.
-
-    Model lookup uses longest-prefix matching: `claude-sonnet-4-5-20241022` matches
-    the `claude-sonnet-4` entry. Add new models to the `PRICING` dict.
-
-    If a model is not found, cost is logged as `0.0` (never crashes).
-
-    ---
-
-    ## Useful one-liners
-
-    ```bash
-    # Today's spend by session
-    jq -r 'select(.type=="session_summary") | [.session_id[:8], "$"+(.total_cost_usd|tostring), .provider_calls, "calls"] | @tsv' \
-      ~/.amplifier/observability/$(date +%Y-%m-%d).jsonl
-
-    # Total spend this month
-    jq -s '[.[] | select(.type=="session_summary") | .total_cost_usd] | add' \
-      ~/.amplifier/observability/$(date +%Y-%m).*.jsonl 2>/dev/null || echo "0"
-
-    # Most expensive models today
-    jq -r 'select(.type=="provider_call") | [.model, .cost_usd] | @tsv' \
-      ~/.amplifier/observability/$(date +%Y-%m-%d).jsonl | \
-      awk '{sum[$1]+=$2} END {for (m in sum) print sum[m], m}' | sort -rn | head -10
-    ```
-    
+Fetches the latest model prices from [LiteLLM's catalog](https://github.com/BerriAI/litellm) and rewrites `pricing.py`. Run this when new models are released or rates change.
