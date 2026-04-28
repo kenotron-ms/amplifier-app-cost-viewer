@@ -2542,3 +2542,65 @@ def test_no_hardcoded_220_in_acv_body_styles(app_js_code: str) -> None:
     assert "width: 220px" not in app_js_code, (
         "AcvBody CSS template must use state.labelColW instead of hardcoded 'width: 220px'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Fix 1 — per-model colors in _spanColor
+# ---------------------------------------------------------------------------
+
+
+def test_model_colors_map_exists(app_js_code: str) -> None:
+    """MODEL_COLORS map must exist with per-model entries."""
+    assert "MODEL_COLORS" in app_js_code, (
+        "_spanColor must use a MODEL_COLORS lookup table for per-model color assignments"
+    )
+    assert "claude-opus" in app_js_code, (
+        "MODEL_COLORS must have an entry for 'claude-opus'"
+    )
+    assert "claude-sonnet" in app_js_code, (
+        "MODEL_COLORS must have an entry for 'claude-sonnet'"
+    )
+    assert "claude-haiku" in app_js_code, (
+        "MODEL_COLORS must have an entry for 'claude-haiku'"
+    )
+
+
+def test_span_color_differentiates_models(app_js_code: str) -> None:
+    """Different Claude models must return different colors."""
+    # opus color — darkest purple
+    assert "'#5A1A9B'" in app_js_code or '"#5A1A9B"' in app_js_code, (
+        "MODEL_COLORS must map claude-opus to '#5A1A9B' (darkest purple)"
+    )
+    # sonnet color — mid purple
+    assert "'#9C59D1'" in app_js_code or '"#9C59D1"' in app_js_code, (
+        "MODEL_COLORS must map claude-sonnet to '#9C59D1' (mid purple)"
+    )
+    # haiku color — lightest purple
+    assert "'#C08FE8'" in app_js_code or '"#C08FE8"' in app_js_code, (
+        "MODEL_COLORS must map claude-haiku to '#C08FE8' (lightest purple)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Fix 2 — stacked bar chart in AcvOverview #draw()
+# ---------------------------------------------------------------------------
+
+
+def test_overview_stacked_bar_chart(app_js_code: str) -> None:
+    """Overview bar chart must use stacked per-model bars."""
+    assert "modelBuckets" in app_js_code, (
+        "AcvOverview #draw() must use 'modelBuckets' Map for per-model cost buckets"
+    )
+    assert "stackBase" in app_js_code, (
+        "AcvOverview #draw() must use 'stackBase' Float32Array to track stacked bar heights"
+    )
+    assert "sortedModels" in app_js_code, (
+        "AcvOverview #draw() must use 'sortedModels' to render models in cost order"
+    )
+
+
+def test_overview_respects_model_filter(app_js_code: str) -> None:
+    """Overview stacked chart must respect state.modelFilter."""
+    assert "modelFilter" in app_js_code, (
+        "AcvOverview #draw() must check state.modelFilter to skip hidden models"
+    )

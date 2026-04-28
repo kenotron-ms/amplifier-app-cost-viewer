@@ -455,13 +455,72 @@ function _esc(str) {
  * Return a CSS color for a span based on its provider/model.
  * Used by filter bar buttons and pie chart to match span colors.
  */
+
+// Model color palette — purple family for Anthropic, green for OpenAI, blue for Google
+const MODEL_COLORS = {
+  // Anthropic — purple gradient (darker = more capable)
+  'claude-opus':        '#5A1A9B',
+  'claude-opus-4':      '#5A1A9B',
+  'claude-opus-4-5':    '#5A1A9B',
+  'claude-opus-4-6':    '#5A1A9B',
+  'claude-sonnet':      '#9C59D1',
+  'claude-sonnet-4':    '#9C59D1',
+  'claude-sonnet-4-5':  '#9C59D1',
+  'claude-sonnet-4-6':  '#9C59D1',
+  'claude-haiku':       '#C08FE8',
+  'claude-haiku-4':     '#C08FE8',
+  'claude-haiku-4-5':   '#C08FE8',
+  // OpenAI — green/teal gradient (darker = more capable)
+  'gpt-5':              '#047857',
+  'gpt-5.4':            '#047857',
+  'gpt-5.4-pro':        '#047857',
+  'gpt-4o':             '#10A37F',
+  'gpt-4o-mini':        '#34D399',
+  'gpt-4-5':            '#059669',
+  'gpt-4-1':            '#059669',
+  'gpt-4-1-mini':       '#6EE7B7',
+  'o4-mini':            '#10B981',
+  'o3-mini':            '#0D9488',
+  'o3':                 '#0F766E',
+  // Google — blue family
+  'gemini-2.5-pro':     '#1E40AF',
+  'gemini-2.5-flash':   '#2563EB',
+  'gemini-2.0-flash':   '#3B82F6',
+  'gemini-1.5-pro':     '#1D4ED8',
+  'gemini-1.5-flash':   '#60A5FA',
+};
+
 function _spanColor(span) {
+  const model = (span.model || '').toLowerCase();
   const provider = (span.provider || '').toLowerCase();
-  const model    = (span.model    || '').toLowerCase();
-  if (provider === 'anthropic' || model.includes('claude')) return '#7b2fbe';
-  if (provider === 'openai'    || model.includes('gpt') || model.startsWith('o')) return '#10a37f';
-  if (provider === 'google'    || model.includes('gemini')) return '#4285f4';
-  return '#64748b';
+
+  // Try exact model match first
+  if (MODEL_COLORS[model]) return MODEL_COLORS[model];
+
+  // Try prefix match (e.g. "claude-sonnet-4-6-2026" matches "claude-sonnet-4-6")
+  const keys = Object.keys(MODEL_COLORS);
+  const prefix = keys.find(k => model.startsWith(k) || model.includes(k.replace(/-\d+$/, '')));
+  if (prefix) return MODEL_COLORS[prefix];
+
+  // Fuzzy match on model family
+  if (model.includes('opus'))    return MODEL_COLORS['claude-opus'];
+  if (model.includes('sonnet'))  return MODEL_COLORS['claude-sonnet'];
+  if (model.includes('haiku'))   return MODEL_COLORS['claude-haiku'];
+  if (model.includes('claude'))  return '#7B2FBE';   // unknown claude
+  if (model.includes('o4'))      return MODEL_COLORS['o4-mini'];
+  if (model.includes('o3'))      return MODEL_COLORS['o3'];
+  if (model.includes('gpt-5'))   return MODEL_COLORS['gpt-5'];
+  if (model.includes('gpt'))     return MODEL_COLORS['gpt-4o'];
+  if (model.includes('gemini'))  return MODEL_COLORS['gemini-2.5-flash'];
+
+  // Provider fallback
+  if (provider === 'anthropic') return '#7B2FBE';
+  if (provider === 'openai')    return '#10A37F';
+  if (provider === 'google')    return '#4285F4';
+
+  // Tool/unknown
+  if (span.type === 'tool')     return '#64748B';
+  return '#64748B';
 }
 
 /**
@@ -832,19 +891,17 @@ class AcvOverview extends HTMLElement {
   }
 
   #draw() {
-    const ctx    = this.#ctx;
+    const ctx = this.#ctx;
     const canvas = this.#canvas;
     if (!ctx || !canvas) return;
     const W = parseFloat(canvas.style.width)  || canvas.width  / (window.devicePixelRatio || 1);
     const H = parseFloat(canvas.style.height) || canvas.height / (window.devicePixelRatio || 1);
-
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = '#0d1117';
     ctx.fillRect(0, 0, W, H);
 
     const spans = state.spans || [];
     const total = state.totalDurationMs || 0;
-
     if (spans.length === 0 || total === 0) {
       ctx.fillStyle = '#8b949e';
       ctx.font = '10px monospace';
@@ -855,41 +912,69 @@ class AcvOverview extends HTMLElement {
       return;
     }
 
-    // Bucket spans by time — one bucket per ~4px
     const N = Math.max(1, Math.floor(W / 4));
-    const buckets = new Float64Array(N);
     const msPerBucket = total / N;
+    const barW = W / N;
+    const availH = H - 2;
+
+    // Build per-model buckets: Map<model, Float64Array(N)>
+    const modelBuckets = new Map();
     for (const span of spans) {
+      // Apply model filter — respect current filter state
+      if (state.modelFilter && state.modelFilter.size > 0 && state.modelFilter.has(span.model)) continue;
+      const cost = span.cost_usd || 0;
+      if (cost <= 0) continue;
       const b = Math.min(N - 1, Math.floor((span.start_ms || 0) / msPerBucket));
-      if (b >= 0) buckets[b] += span.cost_usd || 0;
+      if (b < 0) continue;
+      const key = span.model || span.provider || 'unknown';
+      if (!modelBuckets.has(key)) modelBuckets.set(key, new Float64Array(N));
+      modelBuckets.get(key)[b] += cost;
     }
 
-    const maxCost = Math.max(...buckets, 1e-9);
-    const availH  = H - 2;
-    const barW    = W / N;
-
-    // Draw bars — Anthropic purple, opacity 0.9
-    ctx.fillStyle = 'rgba(123, 47, 190, 0.9)';
-    for (let i = 0; i < N; i++) {
-      if (buckets[i] <= 0) continue;
-      const barH = Math.max(1, (buckets[i] / maxCost) * availH);
-      ctx.fillRect(i * barW, H - barH, barW - 0.5, barH);
+    if (modelBuckets.size === 0) {
+      this.#drawSelectionBox(ctx, W, H);
+      return;
     }
 
-    // Amber peak marker
+    // Find max total cost per bucket (for scaling)
+    const totals = new Float64Array(N);
+    for (const arr of modelBuckets.values()) {
+      for (let i = 0; i < N; i++) totals[i] += arr[i];
+    }
+    const maxTotal = Math.max(...totals, 1e-9);
+
+    // Draw stacked bars — one pass per model, accumulating y offset per bucket
+    const stackBase = new Float32Array(N);  // current top of stack per bucket (from bottom)
+
+    // Sort models by total cost so biggest contributor draws first (bottom of stack)
+    const sortedModels = [...modelBuckets.entries()]
+      .sort((a, b) => b[1].reduce((s, v) => s + v, 0) - a[1].reduce((s, v) => s + v, 0));
+
+    for (const [model, buckets] of sortedModels) {
+      const color = _spanColor({ type: 'llm', model, provider: model.includes('claude') ? 'anthropic' : model.includes('gpt') || model.startsWith('o') ? 'openai' : 'google' });
+      ctx.fillStyle = color;
+      for (let i = 0; i < N; i++) {
+        if (buckets[i] <= 0) continue;
+        const segH = Math.max(1, (buckets[i] / maxTotal) * availH);
+        const x = i * barW;
+        const y = H - stackBase[i] - segH;
+        ctx.fillRect(x, y, barW - 0.5, segH);
+        stackBase[i] += segH;
+      }
+    }
+
+    // Amber peak marker at the tallest bar
     let peakIdx = 0;
-    for (let i = 1; i < N; i++) if (buckets[i] > buckets[peakIdx]) peakIdx = i;
-    if (buckets[peakIdx] > 0) {
+    for (let i = 1; i < N; i++) if (totals[i] > totals[peakIdx]) peakIdx = i;
+    if (totals[peakIdx] > 0) {
       const peakX = (peakIdx + 0.5) * barW;
-      const peakH = (buckets[peakIdx] / maxCost) * availH;
-      const peakY = H - peakH - 1;
+      const peakH = (totals[peakIdx] / maxTotal) * availH;
       ctx.beginPath();
-      ctx.arc(peakX, peakY, 3, 0, Math.PI * 2);
+      ctx.arc(peakX, H - peakH - 1, 3, 0, Math.PI * 2);
       ctx.fillStyle = '#f59e0b';
       ctx.fill();
     }
 
-    // Selection box on top
     this.#drawSelectionBox(ctx, W, H);
   }
 
