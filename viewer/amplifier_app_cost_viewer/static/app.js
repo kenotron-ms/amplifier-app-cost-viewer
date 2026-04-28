@@ -1029,15 +1029,15 @@ class AcvOverview extends HTMLElement {
         canvas.style.cursor = 'grabbing';
       }
       e.preventDefault();
-    });
 
-    canvas.addEventListener('mousemove', e => {
-      const W = canvas.width / (window.devicePixelRatio || 1);
+      // Register document-level drag listeners so drag continues even when mouse leaves canvas
+      if (!this.#dragMode) return;
 
-      // Drag handling
-      if (this.#dragMode) {
-        const dx  = e.offsetX - this.#dragStartX;
-        const dms = (dx / W) * state.totalDurationMs;
+      const onMove = ev => {
+        const rect = canvas.getBoundingClientRect();
+        const cssW = rect.width;
+        const dx  = ev.clientX - rect.left - this.#dragStartX;
+        const dms = (dx / cssW) * state.totalDurationMs;
 
         if (this.#dragMode === 'pan') {
           const dur = this.#dragStartMs.end - this.#dragStartMs.start;
@@ -1050,10 +1050,20 @@ class AcvOverview extends HTMLElement {
           const clampedEnd = Math.min(state.totalDurationMs, Math.max(this.#dragStartMs.start + MIN_SPAN_MS, this.#dragStartMs.end + dms));
           setViewport(this.#dragStartMs.start, clampedEnd, false);
         }
-        return;
-      }
+      };
+      const onUp = () => {
+        this.#dragMode = null;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
 
-      // Cursor feedback when not dragging
+    // Cursor feedback stays on canvas — drag movement is handled by document-level listeners
+    canvas.addEventListener('mousemove', e => {
+      if (this.#dragMode) return; // drag in progress, document listener handles movement
+      const W = canvas.width / (window.devicePixelRatio || 1);
       const x  = e.offsetX;
       const x1 = ovTimeToPixel(state.viewportStartMs, W);
       const x2 = ovTimeToPixel(state.viewportEndMs, W);
@@ -1067,14 +1077,6 @@ class AcvOverview extends HTMLElement {
         canvas.style.cursor = 'crosshair';
       }
     });
-
-    const stopDrag = () => {
-      if (this.#dragMode) {
-        this.#dragMode = null;
-      }
-    };
-    canvas.addEventListener('mouseup', stopDrag);
-    canvas.addEventListener('mouseleave', stopDrag);
   }
 }
 
@@ -1654,7 +1656,7 @@ class AcvBody extends HTMLElement {
   // ── Canvas event handlers ─────────────────────────────────────────────────
 
   #wireCanvasEvents(canvas) {
-    // Drag to pan viewport
+    // Drag to pan viewport — document-level listeners so drag survives cursor leaving canvas
     canvas.addEventListener('mousedown', e => {
       if (e.button !== 0) return;
       this.#dragStartX              = e.clientX;
@@ -1664,12 +1666,9 @@ class AcvBody extends HTMLElement {
       this.#hasDragged              = false;
       canvas.style.cursor           = 'grabbing';
       e.preventDefault();
-    });
 
-    canvas.addEventListener('mousemove', e => {
-      // --- existing drag logic first ---
-      if (this.#isDragging) {
-        const delta = e.clientX - this.#dragStartX;
+      const onDocMove = ev => {
+        const delta = ev.clientX - this.#dragStartX;
         if (Math.abs(delta) > 4) this.#hasDragged = true;
         if (this.#hasDragged) {
           const W      = canvas.width / (window.devicePixelRatio || 1);
@@ -1680,8 +1679,20 @@ class AcvBody extends HTMLElement {
             false,
           );
         }
-        return;
-      }
+      };
+      const onDocUp = () => {
+        this.#isDragging    = false;
+        canvas.style.cursor = 'grab';
+        document.removeEventListener('mousemove', onDocMove);
+        document.removeEventListener('mouseup', onDocUp);
+      };
+      document.addEventListener('mousemove', onDocMove);
+      document.addEventListener('mouseup', onDocUp);
+    });
+
+    // Cursor feedback stays on canvas — drag movement handled by document-level listeners
+    canvas.addEventListener('mousemove', e => {
+      if (this.#isDragging) return; // drag in progress, document listener handles movement
       // --- cursor feedback for hoverable spans ---
       const W = parseFloat(canvas.style.width) || canvas.width;
       const rect = canvas.getBoundingClientRect();
@@ -1702,13 +1713,6 @@ class AcvBody extends HTMLElement {
       }
       canvas.style.cursor = overSpan ? 'pointer' : 'grab';
     });
-
-    const stopDrag = () => {
-      this.#isDragging    = false;
-      canvas.style.cursor = 'grab';
-    };
-    canvas.addEventListener('mouseup',    e => { if (this.#hasDragged) e.stopPropagation(); stopDrag(); });
-    canvas.addEventListener('mouseleave', stopDrag);
 
     // Cmd/Ctrl + scroll → zoom; plain scroll → route to table-wrap
     canvas.addEventListener('wheel', e => {
@@ -1963,7 +1967,7 @@ class AcvDetail extends HTMLElement {
       const summaryContent = html`
         <div class="detail-stats">${this.#statsBlock(span)}</div>
         <div class="pie-section">
-          <div class="pie-title">Cost breakdown — this session</div>
+          <div class="pie-title">Cost in selection</div>
           <div class="pie-row">
             <canvas class="pie-canvas"></canvas>
             <div class="pie-legend"></div>
@@ -2014,10 +2018,16 @@ class AcvDetail extends HTMLElement {
     const spans = state.spans || [];
     if (spans.length === 0) return;
 
-    // Aggregate cost by model
+    // Aggregate cost by model — only spans within the current viewport selection
+    const viewStart = state.viewportStartMs || 0;
+    const viewEnd   = state.viewportEndMs   || state.totalDurationMs || Infinity;
     const byCost = new Map();
     for (const s of spans) {
       if (!s.cost_usd || s.cost_usd <= 0) continue;
+      // Include span only if it overlaps the viewport range
+      const spanStart = s.start_ms || 0;
+      const spanEnd   = s.end_ms   || spanStart;
+      if (spanEnd < viewStart || spanStart > viewEnd) continue;
       const key = s.model || s.provider || 'unknown';
       byCost.set(key, (byCost.get(key) || 0) + s.cost_usd);
     }

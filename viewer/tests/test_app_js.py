@@ -1151,8 +1151,13 @@ def test_drag_pan_mousemove_handler(app_js_code: str) -> None:
 
 
 def test_drag_pan_stops_on_mouseleave(app_js_code: str) -> None:
-    """Drag must stop on mouseleave to avoid stuck drag state."""
-    assert "mouseleave" in app_js_code
+    """Drag cleanup must prevent stuck drag state.
+
+    Originally checked for mouseleave; now drag uses document-level mouseup
+    listeners that are explicitly removed in onDocUp / onUp handlers.
+    document.removeEventListener is the canonical cleanup mechanism.
+    """
+    assert "document.removeEventListener" in app_js_code
 
 
 # ---------------------------------------------------------------------------
@@ -2604,3 +2609,37 @@ def test_overview_respects_model_filter(app_js_code: str) -> None:
     assert "modelFilter" in app_js_code, (
         "AcvOverview #draw() must check state.modelFilter to skip hidden models"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Fix 1 — pie chart reflects selection (viewport range)
+# ---------------------------------------------------------------------------
+
+
+def test_pie_chart_filters_by_viewport(app_js_code: str) -> None:
+    """Pie chart must only include spans within the viewport selection."""
+    assert 'viewportStartMs' in app_js_code
+    assert 'viewportEndMs' in app_js_code
+    # Must check if span overlaps viewport
+    assert 'viewStart' in app_js_code or 'viewportStart' in app_js_code.lower()
+
+
+def test_pie_chart_title_says_selection(app_js_code: str) -> None:
+    """Pie chart title must say 'Cost in selection' not 'this session'."""
+    assert 'Cost in selection' in app_js_code
+    assert 'Cost breakdown \u2014 this session' not in app_js_code
+
+
+# ---------------------------------------------------------------------------
+# Tests: Fix 2 — overview drag uses document-level listeners
+# ---------------------------------------------------------------------------
+
+
+def test_overview_drag_uses_document_listeners(app_js_code: str) -> None:
+    """Overview drag must attach mousemove/mouseup to document, not canvas."""
+    assert 'document.addEventListener' in app_js_code
+
+
+def test_overview_drag_removes_listeners_on_mouseup(app_js_code: str) -> None:
+    """Overview mouseup must remove document listeners to prevent leak."""
+    assert 'document.removeEventListener' in app_js_code
