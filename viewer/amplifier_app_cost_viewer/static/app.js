@@ -1395,7 +1395,7 @@ class AcvBody extends HTMLElement {
             </tr>
           </thead>
           <tbody>
-            <tr class="spacer-top" style="height: ${topSpacerH}px;"><td colspan="2"></td></tr>
+            <tr class="spacer-top"><td colspan="2" style="padding:0;border:0;"><div style="height:${topSpacerH}px"></div></td></tr>
             ${visibleSlice.map(({ node, depth }, sliceIdx) => {
               const absIdx = first + sliceIdx;
               const hasChildren = (node.children?.length ?? 0) > 0;
@@ -1435,7 +1435,7 @@ class AcvBody extends HTMLElement {
                   <td class="td-canvas" style="background: ${bg};"></td>
                 </tr>`;
             })}
-            <tr class="spacer-bottom" style="height: ${bottomSpacerH}px;"><td colspan="2"></td></tr>
+            <tr class="spacer-bottom"><td colspan="2" style="padding:0;border:0;"><div style="height:${bottomSpacerH}px"></div></td></tr>
           </tbody>
         </table>
         <canvas id="main-canvas"></canvas>
@@ -1515,18 +1515,14 @@ class AcvBody extends HTMLElement {
       if (measured > 0) this.#rowH = measured;
     }
 
-    // Position canvas top by walking the offsetParent chain from the FIRST DATA ROW
-    // to tableWrap. This is the exact layout position that position:absolute uses,
-    // naturally accounting for thead height, borders, and the spacer-top row.
-    if (firstTr) {
-      let top = 0;
-      let el = firstTr;
-      while (el && el !== tableWrap) {
-        top += el.offsetTop;
-        el = el.offsetParent;
-      }
-      if (top > 0 && top !== this.#theadH) {
-        this.#theadH = top;
+    // Position canvas top = thead height (fixed, scroll-invariant).
+    // Do NOT use firstTr.offsetTop — that includes topSpacerH and drifts
+    // on every scroll, misaligning the canvas by exactly topSpacerH pixels.
+    const theadEl = this._root.querySelector('thead');
+    if (theadEl) {
+      const measured = Math.round(theadEl.getBoundingClientRect().height);
+      if (measured > 0 && measured !== this.#theadH) {
+        this.#theadH = measured;
         // Re-render so the CSS template literal top:${this.#theadH}px updates.
         this._render();
       }
