@@ -1276,6 +1276,8 @@ class AcvBody extends HTMLElement {
         }
         #main-canvas {
           position: absolute;
+          top: ${this.#theadH}px;
+          left: ${state.labelColW}px;
           cursor: grab;
           display: block;
         }
@@ -1456,15 +1458,16 @@ class AcvBody extends HTMLElement {
       if (measured > 0) this.#rowH = measured;
     }
 
-    // Position canvas top by measuring tbody's actual offset from the scroll container
-    // This naturally accounts for thead height + any border/gap between thead and tbody
-    // without any arithmetic that might be off by 1px.
-    const tbodyTop = Math.round(
-      tbody.getBoundingClientRect().top
-      - tableWrap.getBoundingClientRect().top
-      + tableWrap.scrollTop
-    );
-    if (tbodyTop > 0) this.#theadH = tbodyTop;
+    // Measure tbody's layout offset from table-wrap using offsetParent chain.
+    // offsetTop is layout-based (not viewport/scroll dependent) and gives the
+    // exact position used by position:absolute children.
+    const tbodyOffsetTop = tbody.offsetTop + (tbody.offsetParent === tableWrap ? 0 : (tbody.offsetParent?.offsetTop ?? 0));
+    if (tbodyOffsetTop > 0 && tbodyOffsetTop !== this.#theadH) {
+      this.#theadH = tbodyOffsetTop;
+      // Re-render so the CSS template literal top:${this.#theadH}px updates.
+      this.#render();
+    }
+    // Belt-and-suspenders: also set as inline style (overrides any stale CSS).
     mc.style.top  = this.#theadH + 'px';
     mc.style.left = state.labelColW + 'px';
 
