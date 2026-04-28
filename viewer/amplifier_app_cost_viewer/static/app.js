@@ -213,6 +213,41 @@ async function fetchSessions(offset = 0) {
   state.hasMore = data.has_more ?? false;
 }
 
+/**
+ * Fetch costs for a set of sessions from the server and patch them into
+ * state.sessions in-place, then re-render.  Fires-and-forgets — the caller
+ * does NOT await this so the session list appears instantly.
+ *
+ * @param {Array} sessions - session summary objects to compute costs for
+ */
+async function fetchCosts(sessions) {
+  if (!sessions || sessions.length === 0) return;
+  const ids = sessions.map(s => s.session_id);
+  try {
+    const resp = await fetch('/api/sessions/costs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_ids: ids }),
+    });
+    if (!resp.ok) return;
+    const { costs = {} } = await resp.json();
+    // Build a lookup from session_id → cost row for O(1) patch.
+    let changed = false;
+    for (const s of state.sessions) {
+      const c = costs[s.session_id];
+      if (c !== undefined) {
+        s.total_cost_usd    = c.cost_usd;
+        s.total_input_tokens  = c.input_tokens;
+        s.total_output_tokens = c.output_tokens;
+        changed = true;
+      }
+    }
+    if (changed) renderAll();
+  } catch (err) {
+    console.warn('fetchCosts failed:', err);
+  }
+}
+
 async function fetchSession(id) {
   const resp = await fetch(`/api/sessions/${encodeURIComponent(id)}`);
   if (!resp.ok) throw new Error(`GET /api/sessions/${id} → ${resp.status}`);
@@ -2666,6 +2701,7 @@ async function init() {
         await fetch('/api/refresh', { method: 'POST' });
         await fetchSessions(0);
         renderAll();
+        fetchCosts(state.sessions); // fire-and-forget: costs fill in after list renders
         if (state.sessions.length > 0) {
           await loadSession(state.sessions[0].session_id);
         }
@@ -2677,8 +2713,11 @@ async function init() {
     // Wire: load-more → fetch next page of sessions
     toolbar.addEventListener('load-more', async () => {
       try {
+        const prevCount = state.sessions.length;
         await fetchSessions(state.sessions.length);
         renderAll();
+        // Only fetch costs for the newly-added sessions
+        fetchCosts(state.sessions.slice(prevCount)); // fire-and-forget
       } catch (err) {
         console.error('Load more failed:', err);
       }
@@ -2788,7 +2827,8 @@ async function init() {
 
   try {
     await fetchSessions();
-    renderAll();
+    renderAll(); // list renders immediately — costs show as $0.0000 until fetchCosts fills them in
+    fetchCosts(state.sessions); // fire-and-forget: costs arrive and re-render on their own
 
     if (state.sessions.length > 0) {
       await loadSession(state.sessions[0].session_id);
