@@ -737,9 +737,6 @@ class AcvToolbar extends HTMLElement {
   }
 
   _render() {
-    const totalCost = state.sessions.reduce(
-      (sum, s) => sum + (s.total_cost_usd || 0), 0
-    );
     render(html`
       <style>
         :host {
@@ -796,7 +793,7 @@ class AcvToolbar extends HTMLElement {
         `)}
         ${state.hasMore ? html`<option value="__load_more__">Load more…</option>` : ''}
       </select>
-      <span class="cost-total">Total: <strong>$${totalCost.toFixed(4)}</strong></span>
+
       <span class="spacer"></span>
       <button @click=${() => this._onRefresh()} title="Refresh">↺</button>
       ${state.loading ? html`<span class="spinner" aria-label="Loading"></span>` : ''}
@@ -2829,18 +2826,7 @@ async function init() {
     renderAll();
   }
 
-  // Background-load remaining session pages so the full list is always available.
-  // Each batch fetches costs after loading, then re-renders the toolbar dropdown.
-  (async () => {
-    while (state.hasMore) {
-      try {
-        const prev = state.sessions.length;
-        await fetchSessions(state.sessions.length);
-        renderAll();
-        fetchCosts(state.sessions.slice(prev)); // costs for new batch only
-      } catch { break; }
-    }
-  })();
+
 }
 
 document.addEventListener('DOMContentLoaded', init);
