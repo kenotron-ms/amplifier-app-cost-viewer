@@ -1253,10 +1253,12 @@ class AcvBody extends HTMLElement {
           flex-shrink: 0;
         }
         .td-label .label-name {
-          display: inline;
+          display: inline-block;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+          vertical-align: middle;
+          max-width: calc(100% - 90px);  /* leave room for cost + toggle + copy btn */
         }
         .live-dot {
           color: #3fb950;
@@ -1458,14 +1460,21 @@ class AcvBody extends HTMLElement {
       if (measured > 0) this.#rowH = measured;
     }
 
-    // Measure tbody's layout offset from table-wrap using offsetParent chain.
-    // offsetTop is layout-based (not viewport/scroll dependent) and gives the
-    // exact position used by position:absolute children.
-    const tbodyOffsetTop = tbody.offsetTop + (tbody.offsetParent === tableWrap ? 0 : (tbody.offsetParent?.offsetTop ?? 0));
-    if (tbodyOffsetTop > 0 && tbodyOffsetTop !== this.#theadH) {
-      this.#theadH = tbodyOffsetTop;
-      // Re-render so the CSS template literal top:${this.#theadH}px updates.
-      this._render();
+    // Position canvas top by walking the offsetParent chain from the FIRST DATA ROW
+    // to tableWrap. This is the exact layout position that position:absolute uses,
+    // naturally accounting for thead height, borders, and the spacer-top row.
+    if (firstTr) {
+      let top = 0;
+      let el = firstTr;
+      while (el && el !== tableWrap) {
+        top += el.offsetTop;
+        el = el.offsetParent;
+      }
+      if (top > 0 && top !== this.#theadH) {
+        this.#theadH = top;
+        // Re-render so the CSS template literal top:${this.#theadH}px updates.
+        this._render();
+      }
     }
     // Belt-and-suspenders: also set as inline style (overrides any stale CSS).
     mc.style.top  = this.#theadH + 'px';
@@ -1805,6 +1814,26 @@ class AcvBody extends HTMLElement {
 
     let startX = 0;
     let startW = 0;
+
+    // Double-click: auto-fit column to widest label
+    handle.addEventListener('dblclick', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const ctx2d = document.createElement('canvas').getContext('2d');
+      ctx2d.font = '11px "SF Mono", Consolas, Monaco, monospace';
+      let maxW = 160;
+      const items = _visibleRowsWithDepth(state.sessionData, state.expandedSessions);
+      for (const {node, depth} of (items || [])) {
+        const formatted = _formatAgentName(node.agent_name);
+        const name = formatted || (node.name ? node.name.slice(0, 32) : node.session_id.slice(0, 8));
+        const indent = 8 + depth * 14;
+        maxW = Math.max(maxW, indent + 14 + ctx2d.measureText(name).width + 70);
+      }
+      state.labelColW = Math.min(500, Math.round(maxW));
+      this._render();
+      this.#ensureCanvases();
+      this.#scheduleRedraw();
+    });
 
     handle.addEventListener('mousedown', e => {
       startX = e.clientX;

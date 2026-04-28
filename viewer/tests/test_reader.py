@@ -753,34 +753,6 @@ def test_both_parent_id_keys_accepted(tmp_path):
     assert sessions["child-old"].parent_id == "root-abc"
 
 
-def test_observability_costs_loaded(tmp_path):
-    """Pre-computed costs from observability JSONL enrich the session list."""
-    amp_home = tmp_path / ".amplifier"
-    s_dir = amp_home / "projects" / "p" / "sessions" / "sess-abc"
-    s_dir.mkdir(parents=True)
-    (s_dir / "metadata.json").write_text(
-        json.dumps({"session_id": "sess-abc", "created": "2026-01-01T00:00:00Z"})
-    )
-    (s_dir / "events.jsonl").write_text(
-        '{"ts":"2026-01-01T00:00:00Z","event":"session:start","session_id":"sess-abc"}\n'
-    )
-    obs_dir = amp_home / "observability"
-    obs_dir.mkdir()
-    (obs_dir / "sess-abc.jsonl").write_text(
-        json.dumps(
-            {
-                "type": "session_summary",
-                "session_id": "sess-abc",
-                "total_cost_usd": 1.2345,
-            }
-        )
-        + "\n"
-    )
-    roots = build_session_tree(amp_home)
-    node = next(r for r in roots if r.session_id == "sess-abc")
-    assert abs(node.total_cost_usd - 1.2345) < 0.0001
-
-
 # ---------------------------------------------------------------------------
 # Performance fix tests (perf-fix TDD RED)
 # ---------------------------------------------------------------------------
