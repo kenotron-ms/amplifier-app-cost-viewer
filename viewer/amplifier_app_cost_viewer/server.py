@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 import threading
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+import amplifier_app_cost_viewer.db as _db
 import amplifier_app_cost_viewer.reader as _reader
 from amplifier_app_cost_viewer.reader import (
     SessionNode,
@@ -27,6 +30,9 @@ AMPLIFIER_HOME: Path = Path(
     os.environ.get("AMPLIFIER_HOME", str(Path.home() / ".amplifier"))
 )
 
+# Pre-computed by the Rust scanner; path is deterministic even before scanner runs.
+_SCANNER_DB_PATH: Path = AMPLIFIER_HOME / "cost-viewer" / "summaries.db"
+
 # ---------------------------------------------------------------------------
 # In-memory caches
 # ---------------------------------------------------------------------------
@@ -34,6 +40,151 @@ AMPLIFIER_HOME: Path = Path(
 _roots_cache: list[SessionNode] | None = None
 _loaded_cache: dict[str, SessionNode] = {}  # session_id → fully loaded root node
 _roots_lock = threading.Lock()  # prevents concurrent tree builds (prewarm + request)
+
+# ---------------------------------------------------------------------------
+# Rust scanner process
+# ---------------------------------------------------------------------------
+
+_scanner_proc: subprocess.Popen | None = None  # type: ignore[type-arg]
+
+
+def _export_pricing_json(cost_viewer_dir: Path) -> Path:
+    """Write STATIC_PRICING to cost-viewer/pricing.json for the Rust scanner.
+
+    The scanner reads this file at startup to look up per-token costs.
+    Re-written on every server start so it tracks pricing.py changes.
+    """
+    from amplifier_app_cost_viewer.pricing import STATIC_PRICING
+
+    cost_viewer_dir.mkdir(parents=True, exist_ok=True)
+    pricing_path = cost_viewer_dir / "pricing.json"
+    pricing_path.write_text(json.dumps(STATIC_PRICING))
+    return pricing_path
+
+
+def _find_scanner_binary() -> Path | None:
+    """Locate the amplifier-cost-scan binary.
+
+    Checks two locations in priority order:
+    1. Installed location  — ~/.amplifier/cost-viewer/amplifier-cost-scan
+    2. Dev build location  — <repo-root>/scanner/target/release/amplifier-cost-scan
+    """
+    candidates = [
+        AMPLIFIER_HOME / "cost-viewer" / "amplifier-cost-scan",
+        # __file__ = .../viewer/amplifier_app_cost_viewer/server.py
+        # parent.parent.parent = repo root (cost-viewer/)
+        Path(__file__).parent.parent.parent
+        / "scanner"
+        / "target"
+        / "release"
+        / "amplifier-cost-scan",
+    ]
+    for p in candidates:
+        if p.exists() and p.is_file():
+            return p
+    return None
+
+
+def _monitor_scanner(proc: "subprocess.Popen[bytes]") -> None:
+    """Drain scanner stderr; invalidate the roots cache after the first scan.
+
+    Runs in a daemon thread for the lifetime of the scanner process.
+    Consuming stderr prevents the OS pipe buffer from filling and blocking
+    the scanner, while also letting us detect the first completed scan.
+    """
+    global _roots_cache, _loaded_cache
+    first_done = False
+    try:
+        for raw_line in proc.stderr:  # type: ignore[union-attr]
+            line = raw_line.decode(errors="replace").strip()
+            print(line)
+            if not first_done and "scan complete" in line:
+                first_done = True
+                # Invalidate cache so next /api/sessions request picks up
+                # the freshly-computed costs from summaries.db.
+                with _roots_lock:
+                    _roots_cache = None
+                    _loaded_cache.clear()
+    except OSError:
+        pass
+
+
+def _launch_scanner() -> None:
+    """Export pricing.json and start the Rust scanner in --watch 30 mode.
+
+    Called from a background thread at startup so it doesn't block the
+    FastAPI event loop or the prewarm cache build.
+    """
+    global _scanner_proc
+
+    cost_viewer_dir = AMPLIFIER_HOME / "cost-viewer"
+    pricing_path = _export_pricing_json(cost_viewer_dir)
+
+    scanner_bin = _find_scanner_binary()
+    if scanner_bin is None:
+        print(
+            "[cost-viewer] amplifier-cost-scan binary not found — "
+            "run 'cargo build --release' in scanner/ and restart the server, "
+            "or copy the binary to ~/.amplifier/cost-viewer/amplifier-cost-scan"
+        )
+        return
+
+    _scanner_proc = subprocess.Popen(
+        [
+            str(scanner_bin),
+            "--home",
+            str(AMPLIFIER_HOME),
+            "--db",
+            str(_SCANNER_DB_PATH),
+            "--pricing",
+            str(pricing_path),
+            "--watch",
+            "30",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    print(f"[cost-viewer] scanner started (PID {_scanner_proc.pid})")
+    threading.Thread(
+        target=_monitor_scanner,
+        args=(_scanner_proc,),
+        daemon=True,
+        name="scanner-monitor",
+    ).start()
+
+
+def _apply_scanner_costs(roots: list[SessionNode]) -> None:
+    """Overlay pre-computed costs from summaries.db onto the session tree.
+
+    Called inside _get_roots() immediately after build_session_tree() so
+    the list-view response always includes scanner-computed costs rather
+    than the all-zero placeholders that build_session_tree() returns.
+
+    For each node found in the DB:
+      - node.cost_usd        ← DB cost_usd
+      - node.own_input_tokens  ← DB input_tokens
+      - node.own_output_tokens ← DB output_tokens
+
+    After updating own_* values, aggregate_costs() is re-run on each root
+    to propagate totals up the tree.
+    """
+    summaries = _db.load_all(_SCANNER_DB_PATH)
+    if not summaries:
+        return
+
+    def _apply(node: SessionNode) -> None:
+        row = summaries.get(node.session_id)
+        if row:
+            node.cost_usd = row["cost_usd"]
+            node.own_input_tokens = row["input_tokens"]
+            node.own_output_tokens = row["output_tokens"]
+        for child in node.children:
+            _apply(child)
+
+    for root in roots:
+        _apply(root)
+        aggregate_costs(root)  # re-aggregate after own_* values updated
+
 
 # ---------------------------------------------------------------------------
 # FastAPI application
@@ -47,6 +198,29 @@ def _iter_nodes(root: SessionNode):
     yield root
     for child in root.children:
         yield from _iter_nodes(child)
+
+
+@app.on_event("startup")
+async def _start_scanner() -> None:
+    """Export pricing.json and start the Rust scanner sidecar at server startup.
+
+    Runs the heavy I/O (pricing export + subprocess launch) in a thread so
+    the FastAPI event loop is not blocked.
+    """
+    import asyncio
+
+    asyncio.create_task(asyncio.to_thread(_launch_scanner))
+
+
+@app.on_event("shutdown")
+async def _stop_scanner() -> None:
+    """Terminate the scanner subprocess gracefully on server shutdown."""
+    if _scanner_proc is not None and _scanner_proc.poll() is None:
+        _scanner_proc.terminate()
+        try:
+            _scanner_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _scanner_proc.kill()
 
 
 @app.on_event("startup")
@@ -182,11 +356,16 @@ def _get_roots(force: bool = False) -> list[SessionNode]:
 
     Thread-safe: the lock prevents the prewarm background task and a
     concurrent request handler from both running build_session_tree at once.
+
+    After building the raw tree (which has zero-cost placeholders), overlays
+    pre-computed costs from the Rust scanner's summaries.db so the list view
+    shows real USD values without inline event-log parsing.
     """
     global _roots_cache
     with _roots_lock:
         if _roots_cache is None or force:
             _roots_cache = build_session_tree(AMPLIFIER_HOME)
+            _apply_scanner_costs(_roots_cache)
         return _roots_cache
 
 
@@ -211,8 +390,8 @@ def _parse_all_spans_for_node(node: SessionNode, root_start_ms: int) -> None:
                 node.events_path, root_start_ms, session_start_ms
             )
             node.cost_usd = sum(s.cost_usd for s in node.spans)
-            node.total_input_tokens = sum(s.input_tokens for s in node.spans)
-            node.total_output_tokens = sum(s.output_tokens for s in node.spans)
+            node.own_input_tokens = sum(s.input_tokens for s in node.spans)
+            node.own_output_tokens = sum(s.output_tokens for s in node.spans)
         except (ValueError, OSError):
             pass
     for child in node.children:
@@ -272,8 +451,8 @@ def _load_session(session_id: str, only_root: bool = False) -> SessionNode | Non
                     root.events_path, root_start_ms, root_start_ms
                 )
                 root.cost_usd = sum(s.cost_usd for s in root.spans)
-                root.total_input_tokens = sum(s.input_tokens for s in root.spans)
-                root.total_output_tokens = sum(s.output_tokens for s in root.spans)
+                root.own_input_tokens = sum(s.input_tokens for s in root.spans)
+                root.own_output_tokens = sum(s.output_tokens for s in root.spans)
             except (ValueError, OSError):
                 pass
         # Do NOT cache — children are still unloaded
@@ -390,10 +569,14 @@ def get_pricing() -> dict:
 
     rates = {
         model: {
-            "input":       round(entry.get("input_cost_per_token", 0)            * 1_000_000, 6),
-            "output":      round(entry.get("output_cost_per_token", 0)           * 1_000_000, 6),
-            "cache_read":  round(entry.get("cache_read_input_token_cost", 0)     * 1_000_000, 6),
-            "cache_write": round(entry.get("cache_creation_input_token_cost", 0) * 1_000_000, 6),
+            "input": round(entry.get("input_cost_per_token", 0) * 1_000_000, 6),
+            "output": round(entry.get("output_cost_per_token", 0) * 1_000_000, 6),
+            "cache_read": round(
+                entry.get("cache_read_input_token_cost", 0) * 1_000_000, 6
+            ),
+            "cache_write": round(
+                entry.get("cache_creation_input_token_cost", 0) * 1_000_000, 6
+            ),
         }
         for model, entry in _p.STATIC_PRICING.items()
     }

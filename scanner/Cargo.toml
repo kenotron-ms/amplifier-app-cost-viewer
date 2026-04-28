@@ -1,0 +1,23 @@
+[package]
+name = "amplifier-cost-scan"
+version = "0.1.0"
+edition = "2021"
+description = "Fast incremental scanner: reads Amplifier events.jsonl files and writes cost summaries to SQLite"
+
+[[bin]]
+name = "amplifier-cost-scan"
+path = "src/main.rs"
+
+[dependencies]
+rayon       = "1.10"
+serde       = { version = "1.0", features = ["derive"] }
+serde_json  = "1.0"
+rusqlite    = { version = "0.32", features = ["bundled"] }
+clap        = { version = "4.5", features = ["derive"] }
+walkdir     = "2.5"
+
+[profile.release]
+opt-level      = 3
+lto            = true
+codegen-units  = 1
+strip          = true

@@ -1,0 +1,1 @@
+/Users/ken/workspace/ms/cost-viewer/scanner/target/release/amplifier-cost-scan: /Users/ken/workspace/ms/cost-viewer/scanner/src/db.rs /Users/ken/workspace/ms/cost-viewer/scanner/src/main.rs /Users/ken/workspace/ms/cost-viewer/scanner/src/pricing.rs /Users/ken/workspace/ms/cost-viewer/scanner/src/scan.rs
