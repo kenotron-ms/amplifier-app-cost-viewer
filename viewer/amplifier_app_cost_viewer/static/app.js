@@ -1465,7 +1465,7 @@ class AcvBody extends HTMLElement {
     if (tbodyOffsetTop > 0 && tbodyOffsetTop !== this.#theadH) {
       this.#theadH = tbodyOffsetTop;
       // Re-render so the CSS template literal top:${this.#theadH}px updates.
-      this.#render();
+      this._render();
     }
     // Belt-and-suspenders: also set as inline style (overrides any stale CSS).
     mc.style.top  = this.#theadH + 'px';
